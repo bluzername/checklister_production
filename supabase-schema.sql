@@ -1,7 +1,7 @@
 -- SwingTrade Pro Database Schema
 -- Run this SQL in your Supabase SQL Editor
 
--- Portfolio table
+-- Portfolio table (allows multiple entries per ticker for DCA/multiple purchases)
 CREATE TABLE portfolios (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
@@ -9,8 +9,7 @@ CREATE TABLE portfolios (
   buy_price DECIMAL(10,2) NOT NULL,
   quantity DECIMAL(10,4) NOT NULL,
   date_added TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  notes TEXT,
-  UNIQUE(user_id, ticker)
+  notes TEXT
 );
 
 -- Watchlist table

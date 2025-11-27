@@ -62,9 +62,6 @@ export async function addPosition(
             .single();
 
         if (error) {
-            if (error.code === '23505') {
-                return { success: false, error: 'This ticker is already in your portfolio' };
-            }
             return { success: false, error: error.message };
         }
 
