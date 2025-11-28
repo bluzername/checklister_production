@@ -80,3 +80,4 @@ export function CriteriaRow({ number, label, icon: Icon, score, rationale }: Cri
     );
 }
 
+

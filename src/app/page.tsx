@@ -11,6 +11,7 @@ import { UserMenu } from '@/components/auth/UserMenu';
 import { TabBar, TabType } from '@/components/tabs/TabBar';
 import { PortfolioTab } from '@/components/tabs/PortfolioTab';
 import { WatchlistTab } from '@/components/tabs/WatchlistTab';
+import { MethodologyTab } from '@/components/tabs/MethodologyTab';
 
 export default function Home() {
     const { user, loading: authLoading } = useAuth();
@@ -72,7 +73,7 @@ export default function Home() {
 
     const handleTabChange = (tab: TabType) => {
         setActiveTab(tab);
-        if (tab !== 'analysis') {
+        if (tab !== 'analysis' && tab !== 'methodology') {
             setData(null);
         }
     };
@@ -155,6 +156,10 @@ export default function Home() {
 
             {activeTab === 'watchlist' && user && (
                 <WatchlistTab onSelectItem={handleSelectWatchlistItem} />
+            )}
+
+            {activeTab === 'methodology' && (
+                <MethodologyTab />
             )}
 
             {activeTab === 'analysis' && (

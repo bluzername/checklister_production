@@ -87,3 +87,4 @@ export function WatchlistRow({ item, onDelete, onSelect }: WatchlistRowProps) {
     );
 }
 
+

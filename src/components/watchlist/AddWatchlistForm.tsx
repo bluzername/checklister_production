@@ -110,3 +110,4 @@ export function AddWatchlistForm({ onSuccess }: AddWatchlistFormProps) {
     );
 }
 
+

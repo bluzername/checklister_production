@@ -2,70 +2,137 @@ export type TradeType = 'SWING_LONG' | 'SWING_SHORT' | 'HOLD' | 'AVOID';
 export type MarketStatus = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 export type FundamentalStatus = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
 export type TrendStatus = 'UPTREND' | 'DOWNTREND' | 'CONSOLIDATION';
-export type MomentumStatus = 'OVERBOUGHT' | 'OVERSOLD' | 'NEUTRAL';
+export type MomentumStatus = 'OVERBOUGHT' | 'OVERSOLD' | 'NEUTRAL' | 'OPTIMAL';
+export type PatternType = 'BULL_FLAG' | 'GAP_UP' | 'BREAKOUT' | 'NONE';
+export type SectorRank = 'TOP_3' | 'MIDDLE' | 'BOTTOM_3';
 
 export interface ParameterScore {
   score: number;
   rationale: string;
 }
 
+// 1. Market Condition (The "Tide")
 export interface MarketCondition extends ParameterScore {
   status: MarketStatus;
   spx_trend: string;
+  spx_price: number;
+  spx_sma50: number;
+  spx_sma200: number;
+  golden_cross: boolean;        // 50 SMA > 200 SMA
+  vix_level?: number;           // Optional VIX filter
+  vix_safe?: boolean;           // VIX < 25
 }
 
+// 2. Sector Condition (Relative Strength)
 export interface SectorCondition extends ParameterScore {
   sector: string;
+  sector_etf: string;           // XLK, XLF, etc.
+  rs_score_20d: number;         // Relative Strength vs SPY (20 days)
+  rs_score_60d: number;         // Relative Strength vs SPY (60 days)
+  sector_rank: SectorRank;      // Top 3, Middle, Bottom 3
+  outperforming: boolean;       // RS > 1.0
   status: string;
 }
 
+// 3. Company & Fundamental Condition
 export interface CompanyCondition extends ParameterScore {
   status: FundamentalStatus;
+  earnings_surprise: boolean;   // EPS reported > EPS expected
+  revenue_growth_qoq: number;   // Quarter-over-Quarter %
+  meets_growth_threshold: boolean; // Growth > 20%
+  sentiment_score: number;      // NLP sentiment 0-1
+  market_cap: number;
   earnings_status: string;
   guidance: string;
 }
 
+// 4. Actual Game Changer (Catalyst & RVOL)
 export interface Catalyst extends ParameterScore {
   present: boolean;
+  has_catalyst: boolean;
+  rvol: number;                 // Relative Volume (vs 30-day avg)
+  rvol_threshold_met: boolean;  // RVOL >= 1.5
+  catalyst_keywords: string[];  // Detected keywords
   catalyst_type: string;
   strength: string;
   timeframe: string;
 }
 
+// 5. Patterns & Gaps
 export interface PatternsGaps extends ParameterScore {
-  pattern: string;
+  pattern: PatternType | string;
+  gap_detected: boolean;
+  gap_percent: number;          // Gap size in %
+  bull_flag_detected: boolean;
+  pole_gain: number;            // Bull flag pole % gain
+  consolidation_days: number;   // Days in consolidation
   gap_status: string;
 }
 
+// 6. Support, Resistance & Stabilizations
 export interface SupportResistance extends ParameterScore {
   support_zones: number[];
   resistance_zones: number[];
+  near_ema20: boolean;          // Within 2-3% of 20 EMA
+  near_ema50: boolean;          // Within 2-3% of 50 EMA
+  swing_low: number;            // Lowest low of last 10 days
+  atr: number;                  // Average True Range
+  stop_loss_level: number;      // Swing Low - 1% ATR
+  take_profit_level: number;    // Entry + 2x Risk
+  risk_reward_ratio: number;    // Calculated R:R
+  rr_passes: boolean;           // R:R > 2.0
 }
 
+// 7. Price Action (Trend Structure)
 export interface PriceMovement extends ParameterScore {
   trend: TrendStatus;
   recent_higher_lows: boolean;
   recent_higher_highs: boolean;
+  hammer_detected: boolean;     // Reversal candle at support
+  candle_confirmation: string;  // Hammer, Engulfing, etc.
 }
 
+// 8. Volume (The "Lie Detector")
 export interface Volume extends ParameterScore {
   status: string;
   volume_trend: string;
+  current_volume: number;
+  avg_volume: number;
+  accumulation_days: number;    // Green days with above-avg volume
+  distribution_days: number;    // Red days with below-avg volume
+  volume_sma5_rising: boolean;  // 5-day volume SMA trending up
+  volume_confirms: boolean;     // Overall confirmation
 }
 
+// 9. Averages & Fibonacci
 export interface MAFibonacci extends ParameterScore {
   ma_20: number;
   ma_50: number;
   ma_100: number;
   ma_200: number;
   ema_8: number;
+  ema_20: number;
   alignment: string;
+  price_above_200sma: boolean;
+  price_above_20ema: boolean;
+  fib_levels: {
+    level_382: number;
+    level_500: number;
+    level_618: number;
+  };
+  in_fib_buy_zone: boolean;     // Price at 0.382, 0.5, or 0.618
   fib_level_current: string;
 }
 
+// 10. RSI (Relative Strength Index)
 export interface RSI extends ParameterScore {
   value: number;
   status: MomentumStatus;
+  in_bull_range: boolean;       // RSI between 40-90
+  dip_buy_signal: boolean;      // RSI touched 40-50 and bouncing
+  positive_momentum: boolean;   // RSI > 50
+  overextended: boolean;        // RSI > 75 (caution)
+  optimal_range: boolean;       // RSI between 45-70
 }
 
 export interface AnalysisParameters {

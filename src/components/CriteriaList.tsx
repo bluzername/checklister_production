@@ -51,3 +51,4 @@ export function CriteriaList({ data }: { data: AnalysisResult }) {
     );
 }
 
+
