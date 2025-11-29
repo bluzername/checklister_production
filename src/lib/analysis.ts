@@ -8,6 +8,9 @@ import {
     SectorRank
 } from './types';
 import YahooFinance from 'yahoo-finance2';
+import { getFundamentals, FundamentalsData } from './data-services/fmp';
+import { analyzeSentiment, SentimentData } from './data-services/sentiment';
+import { withLogging } from './data-services/logger';
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
@@ -408,10 +411,12 @@ export async function analyzeTicker(ticker: string): Promise<AnalysisResult> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const volumes = validQuotes.map((q: any) => q.volume as number).reverse();
 
-    // Fetch additional market data
-    const [marketData, vixLevel] = await Promise.all([
+    // Fetch additional market data and premium data services in parallel
+    const [marketData, vixLevel, fundamentals, sentiment] = await Promise.all([
         fetchMarketData(),
-        fetchVIXLevel()
+        fetchVIXLevel(),
+        getFundamentals(ticker),
+        analyzeSentiment(ticker)
     ]);
     
     // Calculate all technical indicators
@@ -503,32 +508,83 @@ export async function analyzeTicker(ticker: string): Promise<AnalysisResult> {
     // ============================================
     // CRITERION 3: Company & Fundamental Condition
     // ============================================
-    // Note: Full fundamental data requires premium APIs
-    // Using market cap and available data as proxy
-    const revenueGrowth = 0; // Would need fundamental API
-    const earningsSurprise = false; // Would need earnings calendar
-    const sentimentScore = 0.5; // Neutral default
+    // Use EODHD fundamentals data when available, fallback to market cap
+    const earningsSurprise = fundamentals.earnings_surprise;
+    const revenueGrowth = fundamentals.revenue_growth_qoq ?? 0;
+    const fundamentalsAvailable = fundamentals.data_available;
     
     let companyScore = 5;
-    if (marketCap > 50) companyScore = 8; // Large cap
-    else if (marketCap > 10) companyScore = 7;
-    else if (marketCap > 2) companyScore = 5;
-    else companyScore = 3; // Small cap higher risk
+    
+    if (fundamentalsAvailable) {
+        // New scoring with actual fundamentals data
+        const hasEarningsBeat = earningsSurprise;
+        const hasStrongGrowth = revenueGrowth > 20;
+        const hasModerateGrowth = revenueGrowth > 10;
+        const hasEarningsMiss = fundamentals.eps_actual !== null && 
+                                fundamentals.eps_expected !== null && 
+                                fundamentals.eps_actual < fundamentals.eps_expected;
+        const hasRevenueDeclining = revenueGrowth < 0;
+        
+        if (hasEarningsBeat && hasStrongGrowth) {
+            companyScore = 10; // Earnings beat + Revenue growth > 20%
+        } else if (hasEarningsBeat || hasStrongGrowth) {
+            companyScore = 8;  // Earnings beat OR Revenue growth > 20%
+        } else if (hasModerateGrowth) {
+            companyScore = 7;  // Revenue growth > 10%
+        } else if (hasEarningsMiss && hasRevenueDeclining) {
+            companyScore = 1;  // Earnings miss + Revenue declining
+        } else if (hasEarningsMiss) {
+            companyScore = 3;  // Earnings miss
+        } else {
+            companyScore = 5;  // Neutral (no data or mixed)
+        }
+    } else {
+        // Fallback: Use market cap as proxy for company quality
+        if (marketCap > 50) companyScore = 8; // Large cap
+        else if (marketCap > 10) companyScore = 7;
+        else if (marketCap > 2) companyScore = 5;
+        else companyScore = 3; // Small cap higher risk
+    }
     
     // ============================================
     // CRITERION 4: Actual Game Changer (Catalyst & RVOL)
     // ============================================
     const rvolThresholdMet = rvol >= 1.5;
-    // Note: News API integration would detect catalyst keywords
-    const detectedKeywords: string[] = []; // Would need news API
-    const hasCatalyst = rvolThresholdMet; // RVOL alone indicates interest
+    const highRvol = rvol >= 2.0;
+    
+    // Use sentiment analysis for catalyst detection
+    const sentimentAvailable = sentiment.data_available;
+    const hasCatalyst = sentiment.catalyst_detected || rvolThresholdMet;
+    const detectedKeywords = sentiment.catalyst_keywords;
+    const sentimentScore = sentiment.sentiment_score; // -1 to +1
+    const positiveSentiment = sentimentScore > 0.3;
+    const negativeSentiment = sentimentScore < -0.3;
     
     let catalystScore = 5;
-    if (rvol >= 3.0) catalystScore = 10;
-    else if (rvol >= 2.0) catalystScore = 8;
-    else if (rvol >= 1.5) catalystScore = 7;
-    else if (rvol >= 1.0) catalystScore = 5;
-    else catalystScore = 3;
+    
+    if (sentimentAvailable) {
+        // Enhanced scoring with sentiment + RVOL
+        if (highRvol && sentiment.catalyst_detected && positiveSentiment) {
+            catalystScore = 10; // RVOL >= 2.0 + Positive catalyst detected
+        } else if (sentiment.catalyst_detected && positiveSentiment) {
+            catalystScore = 9;  // Positive catalyst detected (merger, FDA, etc.)
+        } else if (highRvol) {
+            catalystScore = 8;  // RVOL >= 2.0
+        } else if (rvolThresholdMet || (positiveSentiment && !sentiment.catalyst_detected)) {
+            catalystScore = 7;  // RVOL >= 1.5 OR mild positive sentiment
+        } else if (negativeSentiment) {
+            catalystScore = 3;  // Negative sentiment detected
+        } else {
+            catalystScore = 5;  // Neutral
+        }
+    } else {
+        // Fallback: RVOL-only scoring
+        if (rvol >= 3.0) catalystScore = 10;
+        else if (rvol >= 2.0) catalystScore = 8;
+        else if (rvol >= 1.5) catalystScore = 7;
+        else if (rvol >= 1.0) catalystScore = 5;
+        else catalystScore = 3;
+    }
     
     // ============================================
     // CRITERION 5: Patterns & Gaps
@@ -677,12 +733,16 @@ export async function analyzeTicker(ticker: string): Promise<AnalysisResult> {
             earnings_surprise: earningsSurprise,
             revenue_growth_qoq: revenueGrowth,
             meets_growth_threshold: revenueGrowth > 20,
-            sentiment_score: sentimentScore,
-            market_cap: marketCap,
-            earnings_status: 'N/A (requires premium API)',
+            sentiment_score: sentiment.sentiment_score,
+            market_cap: fundamentals.market_cap ?? marketCap,
+            earnings_status: fundamentalsAvailable 
+                ? (earningsSurprise ? 'Beat' : fundamentals.eps_actual !== null ? 'Miss/Meet' : 'N/A')
+                : 'N/A (API not configured)',
             guidance: 'N/A',
             score: companyScore,
-            rationale: `Market Cap: $${marketCap.toFixed(1)}B - ${marketCap > 10 ? 'Large' : marketCap > 2 ? 'Mid' : 'Small'} Cap`
+            rationale: fundamentalsAvailable
+                ? `EPS: ${fundamentals.eps_actual?.toFixed(2) ?? 'N/A'} vs ${fundamentals.eps_expected?.toFixed(2) ?? 'N/A'} | Rev Growth: ${revenueGrowth.toFixed(1)}%`
+                : `Market Cap: $${marketCap.toFixed(1)}B - ${marketCap > 10 ? 'Large' : marketCap > 2 ? 'Mid' : 'Small'} Cap`
         },
         "4_catalyst": {
             present: hasCatalyst,
@@ -690,11 +750,13 @@ export async function analyzeTicker(ticker: string): Promise<AnalysisResult> {
             rvol: Math.round(rvol * 100) / 100,
             rvol_threshold_met: rvolThresholdMet,
             catalyst_keywords: detectedKeywords,
-            catalyst_type: rvolThresholdMet ? 'High Interest (RVOL)' : 'None',
-            strength: rvol >= 2 ? 'STRONG' : rvol >= 1.5 ? 'MODERATE' : 'WEAK',
+            catalyst_type: sentiment.catalyst_type || (rvolThresholdMet ? 'High Interest (RVOL)' : 'None'),
+            strength: sentiment.catalyst_detected ? 'STRONG' : rvol >= 2 ? 'STRONG' : rvol >= 1.5 ? 'MODERATE' : 'WEAK',
             timeframe: 'Current',
             score: catalystScore,
-            rationale: `RVOL: ${rvol.toFixed(2)}x (${rvolThresholdMet ? '≥1.5 threshold met' : 'below 1.5 threshold'})`
+            rationale: sentimentAvailable
+                ? `RVOL: ${rvol.toFixed(2)}x | Sentiment: ${sentiment.sentiment_label} (${sentiment.sentiment_score.toFixed(2)})${sentiment.catalyst_detected ? ' | Catalyst: ' + sentiment.summary : ''}`
+                : `RVOL: ${rvol.toFixed(2)}x (${rvolThresholdMet ? '≥1.5 threshold met' : 'below 1.5 threshold'})`
         },
         "5_patterns_gaps": {
             pattern: patternType,

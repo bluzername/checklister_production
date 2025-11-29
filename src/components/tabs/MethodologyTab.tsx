@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 
 // This metadata is extracted from the analysis.ts file
-const METHODOLOGY_VERSION = '2.0.0';
+const METHODOLOGY_VERSION = '2.1.0';
 const LAST_UPDATED = new Date().toISOString().split('T')[0];
 
 interface CriterionDoc {
@@ -157,95 +157,131 @@ const outperforming = avgRS > 1.0`,
         name: 'Company Condition',
         subtitle: 'Fundamental Strength',
         icon: Briefcase,
-        description: 'Verifies the company has fundamental tailwinds supporting the technical setup. Strong fundamentals provide confidence that the move has substance.',
-        objective: 'Check earnings surprise, revenue growth, and market sentiment for fundamental validation.',
-        dataSource: 'Yahoo Finance quote data. Full fundamental analysis requires premium data APIs for earnings, revenue, and sentiment.',
+        description: 'Verifies the company has fundamental tailwinds supporting the technical setup. Uses EODHD API for real earnings and revenue data when configured.',
+        objective: 'Check earnings surprise (EPS beat/miss) and revenue growth QoQ for fundamental validation.',
+        dataSource: 'EODHD API for fundamentals (earnings, revenue, financial statements). Falls back to Yahoo Finance market cap if EODHD not configured.',
         calculation: `
-**Ideal Fundamental Checks (Premium API Required):**
-1. **Earnings Surprise**: EPS Reported > EPS Expected (Positive)
-2. **Revenue Growth**: QoQ Sales Growth > 20%
-3. **Sentiment Score**: NLP analysis of headlines > 0.5
+**With EODHD API (Premium - $20/mo):**
+1. **Earnings Surprise**: Compare EPS Actual vs EPS Expected
+   - Beat = EPS Actual > EPS Expected
+2. **Revenue Growth QoQ**: Calculate quarter-over-quarter change
+   - Growth = (Revenue Current - Revenue Previous) / Revenue Previous × 100
 
-**Current Implementation (Free Data):**
-Uses Market Capitalization as a stability proxy:
-- Large Cap (>$50B): More institutional support, lower risk
-- Mid Cap ($10B-$50B): Balanced risk/reward
-- Small Cap (<$10B): Higher volatility, less institutional coverage`,
+**Scoring Logic:**
+- Score 10: Earnings beat + Revenue growth > 20%
+- Score 8: Earnings beat OR Revenue growth > 20%
+- Score 7: Revenue growth > 10%
+- Score 5: Neutral (no data or mixed signals)
+- Score 3: Earnings miss
+- Score 1: Earnings miss + Revenue declining
+
+**Fallback (No EODHD Key):**
+Uses Market Cap as proxy for company quality`,
         scoringLogic: [
-            { condition: 'Market Cap > $50 Billion (Large Cap)', score: 8, label: 'Institutional Quality' },
-            { condition: 'Market Cap $10B-$50B (Mid-Large Cap)', score: 7, label: 'Quality' },
-            { condition: 'Market Cap $2B-$10B (Mid Cap)', score: 5, label: 'Moderate Risk' },
-            { condition: 'Market Cap < $2B (Small Cap)', score: 3, label: 'Higher Risk' }
+            { condition: 'Earnings Beat + Revenue Growth > 20%', score: 10, label: 'Strong Fundamentals' },
+            { condition: 'Earnings Beat OR Revenue Growth > 20%', score: 8, label: 'Good Fundamentals' },
+            { condition: 'Revenue Growth > 10%', score: 7, label: 'Moderate Growth' },
+            { condition: 'Neutral / Mixed / No Data', score: 5, label: 'Neutral' },
+            { condition: 'Earnings Miss', score: 3, label: 'Weak' },
+            { condition: 'Earnings Miss + Revenue Declining', score: 1, label: 'Poor Fundamentals' }
         ],
-        formula: `// Current implementation (market cap proxy)
-const marketCap = quote.marketCap / 1_000_000_000 // In billions
+        formula: `// With EODHD fundamentals data
+const fundamentals = await getFundamentals(ticker)
 
-if (marketCap > 50) score = 8      // Large cap
-else if (marketCap > 10) score = 7  // Mid-large
-else if (marketCap > 2) score = 5   // Mid cap
-else score = 3                      // Small cap
+if (fundamentals.data_available) {
+  const hasEarningsBeat = fundamentals.earnings_surprise
+  const hasStrongGrowth = fundamentals.revenue_growth_qoq > 20
+  const hasModerateGrowth = fundamentals.revenue_growth_qoq > 10
+  const hasEarningsMiss = eps_actual < eps_expected
+  const hasRevenueDeclining = revenue_growth_qoq < 0
 
-// FUTURE: With premium API
-// if (eps_reported > eps_expected) earningsSurprise = true
-// if (revenue_qoq_growth > 20%) meetsThreshold = true
-// sentimentScore = NLP_analyze(recent_headlines)`,
-        outputFields: ['earnings_surprise: boolean', 'revenue_growth_qoq: number', 'meets_growth_threshold: boolean', 'sentiment_score: number (0-1)', 'market_cap: number (billions)'],
+  if (hasEarningsBeat && hasStrongGrowth) score = 10
+  else if (hasEarningsBeat || hasStrongGrowth) score = 8
+  else if (hasModerateGrowth) score = 7
+  else if (hasEarningsMiss && hasRevenueDeclining) score = 1
+  else if (hasEarningsMiss) score = 3
+  else score = 5
+} else {
+  // Fallback: market cap scoring
+  if (marketCap > 50) score = 8
+  else if (marketCap > 10) score = 7
+  // ...
+}`,
+        outputFields: ['earnings_surprise: boolean', 'eps_actual: number', 'eps_expected: number', 'revenue_growth_qoq: number', 'meets_growth_threshold: boolean', 'market_cap: number'],
         limitations: [
-            'Full fundamental data requires premium APIs (FactSet, Bloomberg)',
-            'Currently uses market cap as proxy for company quality',
-            'No earnings calendar or guidance analysis',
-            'NLP sentiment not implemented'
+            'EODHD API required for full functionality ($20/mo)',
+            'Falls back to market cap if API not configured',
+            'Earnings calendar/next earnings date partially implemented',
+            'Guidance analysis not yet implemented'
         ],
-        codeReference: 'analysis.ts:397-410'
+        codeReference: 'analysis.ts:503-535'
     },
     {
         id: 4,
         key: '4_catalyst',
         name: 'Actual Game Changer',
-        subtitle: 'Catalyst & RVOL',
+        subtitle: 'Catalyst & RVOL + Sentiment',
         icon: Zap,
-        description: 'Quantifies market interest and potential catalysts using volume behavior and news. High relative volume indicates institutional activity and validates price moves.',
-        objective: 'Identify stocks with unusual activity (RVOL) and/or news catalysts that could drive significant moves.',
-        dataSource: 'Real-time volume data from Yahoo Finance. News catalyst detection requires news API integration.',
+        description: 'Combines RVOL (Relative Volume) with AI-powered sentiment analysis using Claude to detect catalysts and market interest.',
+        objective: 'Identify stocks with unusual activity (RVOL) and/or news catalysts using Claude AI for sentiment analysis.',
+        dataSource: 'Volume data from Yahoo Finance + Claude API (Haiku) for sentiment and catalyst detection.',
         calculation: `
 **Relative Volume (RVOL) Calculation:**
 \`RVOL = Today's Volume / SMA(Volume, 30 days)\`
 
-**Interpretation:**
-- RVOL ≥ 3.0x: Extremely high interest (major catalyst)
-- RVOL ≥ 2.0x: Very high interest
-- RVOL ≥ 1.5x: Above-average interest (threshold for "interest")
-- RVOL < 1.0x: Below-average activity
+**Claude Sentiment Analysis:**
+Uses Claude AI to analyze recent news and sentiment:
+- Sentiment Score: -1 (very negative) to +1 (very positive)
+- Catalyst Detection: Identifies mergers, FDA, earnings, contracts, etc.
+- Keywords: Extracts relevant catalyst keywords
 
-**Catalyst Keywords to Scan (Future):**
-"Merger", "Acquisition", "FDA Approval", "Contract", "Earnings Beat", 
-"Regulation", "Sanction", "Partnership", "Buyback", "Upgrade"`,
+**Combined Scoring:**
+- Score 10: RVOL ≥ 2.0 + Positive catalyst detected
+- Score 9: Positive catalyst detected (merger, FDA, etc.)
+- Score 8: RVOL ≥ 2.0
+- Score 7: RVOL ≥ 1.5 OR mild positive sentiment
+- Score 5: Neutral
+- Score 3: Negative sentiment detected`,
         scoringLogic: [
-            { condition: 'RVOL ≥ 3.0x (Extreme volume)', score: 10, label: 'Major Catalyst' },
-            { condition: 'RVOL ≥ 2.0x (Very high)', score: 8, label: 'Strong Interest' },
-            { condition: 'RVOL ≥ 1.5x (Above average)', score: 7, label: 'Moderate Interest' },
-            { condition: 'RVOL 1.0-1.5x (Normal)', score: 5, label: 'Normal Activity' },
-            { condition: 'RVOL < 1.0x (Low)', score: 3, label: 'Low Interest' }
+            { condition: 'RVOL ≥ 2.0 + Positive Catalyst + Positive Sentiment', score: 10, label: 'Strong Catalyst' },
+            { condition: 'Positive Catalyst Detected (merger, FDA, etc.)', score: 9, label: 'Catalyst Present' },
+            { condition: 'RVOL ≥ 2.0x (High volume interest)', score: 8, label: 'High Interest' },
+            { condition: 'RVOL ≥ 1.5x OR Mild Positive Sentiment', score: 7, label: 'Moderate Interest' },
+            { condition: 'Neutral (no catalyst, normal volume)', score: 5, label: 'Neutral' },
+            { condition: 'Negative Sentiment Detected', score: 3, label: 'Caution' }
         ],
-        formula: `const avgVolume30 = SMA(volumes, 30)
+        formula: `// Volume analysis
+const avgVolume30 = SMA(volumes, 30)
 const rvol = currentVolume / avgVolume30
-const rvolThresholdMet = rvol >= 1.5
-const hasCatalyst = rvolThresholdMet // RVOL as proxy for interest
+const highRvol = rvol >= 2.0
 
-// Scoring
-if (rvol >= 3.0) score = 10
-else if (rvol >= 2.0) score = 8
-else if (rvol >= 1.5) score = 7
-else if (rvol >= 1.0) score = 5
-else score = 3`,
-        outputFields: ['has_catalyst: boolean', 'rvol: number', 'rvol_threshold_met: boolean (≥1.5)', 'catalyst_keywords: string[]', 'strength: "STRONG" | "MODERATE" | "WEAK"'],
+// Claude sentiment analysis
+const sentiment = await analyzeSentiment(ticker)
+const positiveSentiment = sentiment.sentiment_score > 0.3
+const negativeSentiment = sentiment.sentiment_score < -0.3
+
+// Combined scoring
+if (highRvol && sentiment.catalyst_detected && positiveSentiment) {
+  score = 10  // Perfect storm: volume + catalyst + sentiment
+} else if (sentiment.catalyst_detected && positiveSentiment) {
+  score = 9   // Catalyst detected
+} else if (highRvol) {
+  score = 8   // High volume alone
+} else if (rvol >= 1.5 || positiveSentiment) {
+  score = 7   // Moderate interest
+} else if (negativeSentiment) {
+  score = 3   // Negative sentiment warning
+} else {
+  score = 5   // Neutral
+}`,
+        outputFields: ['has_catalyst: boolean', 'rvol: number', 'sentiment_score: number (-1 to +1)', 'sentiment_label: string', 'catalyst_detected: boolean', 'catalyst_keywords: string[]', 'summary: string'],
         limitations: [
-            'News API integration not implemented',
-            'Cannot scan for specific catalyst keywords',
-            'Uses RVOL alone as proxy for "catalyst"',
-            'Does not check earnings calendar'
+            'Claude API required for sentiment analysis',
+            'Uses Claude Haiku model (cost: ~$0.00025/call)',
+            'Sentiment based on Claude knowledge cutoff, not real-time news',
+            'Results cached for 1 hour to reduce API costs'
         ],
-        codeReference: 'analysis.ts:412-428'
+        codeReference: 'analysis.ts:537-575'
     },
     {
         id: 5,
