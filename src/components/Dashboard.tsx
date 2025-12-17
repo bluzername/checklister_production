@@ -6,10 +6,25 @@ import { CriteriaList } from './CriteriaList';
 import { TradingViewChart } from './TradingViewChart';
 import { RegimeBadge } from './RegimeBadge';
 import { MultiTimeframeBadge } from './MultiTimeframeBadge';
+import { VetoAnalysisBadge } from './VetoAnalysisBadge';
 
 export function Dashboard({ data }: { data: AnalysisResult }) {
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            {/* ML Veto Analysis Banner */}
+            {data.veto_analysis && (
+                <div className="mb-6">
+                    <VetoAnalysisBadge
+                        vetoed={data.veto_analysis.vetoed}
+                        pLoss={data.veto_analysis.pLoss}
+                        pWin={data.veto_analysis.pWin}
+                        verdict={data.veto_analysis.verdict}
+                        confidence={data.veto_analysis.confidence}
+                        reasons={data.veto_analysis.reasons}
+                    />
+                </div>
+            )}
+
             {/* Market Context Banners */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                 {/* Market Regime Banner */}

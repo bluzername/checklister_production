@@ -1,0 +1,165 @@
+{
+  "gridSearch": {
+    "thresholds": [
+      {
+        "threshold": 0.5,
+        "totalTrades": 165,
+        "vetoedTrades": 121,
+        "vetoRate": 0.7333333333333333,
+        "nonVetoedWinRate": 0.4090909090909091,
+        "nonVetoedAvgR": 0.22070880436487067,
+        "vetoPrecision": 0.6115702479338843,
+        "timingValue": 0.007529978005758053,
+        "profitFactor": 1.3803888742750412
+      },
+      {
+        "threshold": 0.52,
+        "totalTrades": 165,
+        "vetoedTrades": 96,
+        "vetoRate": 0.5818181818181818,
+        "nonVetoedWinRate": 0.42028985507246375,
+        "nonVetoedAvgR": 0.26492255679798654,
+        "vetoPrecision": 0.625,
+        "timingValue": 0.051743730438873925,
+        "profitFactor": 1.4624292260127871
+      },
+      {
+        "threshold": 0.54,
+        "totalTrades": 165,
+        "vetoedTrades": 67,
+        "vetoRate": 0.40606060606060607,
+        "nonVetoedWinRate": 0.41836734693877553,
+        "nonVetoedAvgR": 0.26995105844539724,
+        "vetoPrecision": 0.6417910447761194,
+        "timingValue": 0.056772232086284624,
+        "profitFactor": 1.4612610344923282
+      },
+      {
+        "threshold": 0.56,
+        "totalTrades": 165,
+        "vetoedTrades": 33,
+        "vetoRate": 0.2,
+        "nonVetoedWinRate": 0.4015151515151515,
+        "nonVetoedAvgR": 0.23617050264586048,
+        "vetoPrecision": 0.6363636363636364,
+        "timingValue": 0.022991676286747864,
+        "profitFactor": 1.3818777504663085
+      },
+      {
+        "threshold": 0.58,
+        "totalTrades": 165,
+        "vetoedTrades": 20,
+        "vetoRate": 0.12121212121212122,
+        "nonVetoedWinRate": 0.4068965517241379,
+        "nonVetoedAvgR": 0.25637590585692127,
+        "vetoPrecision": 0.7,
+        "timingValue": 0.043197079497808655,
+        "profitFactor": 1.4194121779989208
+      },
+      {
+        "threshold": 0.6,
+        "totalTrades": 165,
+        "vetoedTrades": 12,
+        "vetoRate": 0.07272727272727272,
+        "nonVetoedWinRate": 0.4117647058823529,
+        "nonVetoedAvgR": 0.26911442058335683,
+        "vetoPrecision": 0.8333333333333334,
+        "timingValue": 0.05593559422424421,
+        "profitFactor": 1.4444821492848114
+      },
+      {
+        "threshold": 0.65,
+        "totalTrades": 165,
+        "vetoedTrades": 1,
+        "vetoRate": 0.006060606060606061,
+        "nonVetoedWinRate": 0.39634146341463417,
+        "nonVetoedAvgR": 0.22057625822715604,
+        "vetoPrecision": 1,
+        "timingValue": 0.007397431868043425,
+        "profitFactor": 1.3559264472261374
+      },
+      {
+        "threshold": 0.7,
+        "totalTrades": 165,
+        "vetoedTrades": 0,
+        "vetoRate": 0,
+        "nonVetoedWinRate": 0.3939393939393939,
+        "nonVetoedAvgR": 0.21317882635911262,
+        "vetoPrecision": 0,
+        "timingValue": 0,
+        "profitFactor": 1.3427152683236072
+      }
+    ],
+    "optimal": 0.6
+  },
+  "algorithms": [
+    {
+      "name": "No Filter (Baseline)",
+      "totalTrades": 165,
+      "takenTrades": 165,
+      "filterRate": 0,
+      "winRate": 0.3939393939393939,
+      "avgR": 0.21317882635911262,
+      "totalR": 35.17450634925358,
+      "profitFactor": 1.3427152683236072,
+      "maxDrawdownR": 12.220227963562742
+    },
+    {
+      "name": "Heuristics (Score >= 50%)",
+      "totalTrades": 165,
+      "takenTrades": 136,
+      "filterRate": 0.17575757575757578,
+      "winRate": 0.3897058823529412,
+      "avgR": 0.22753138514103596,
+      "totalR": 30.94426837918089,
+      "profitFactor": 1.369470266569163,
+      "maxDrawdownR": 8.220227963562742
+    },
+    {
+      "name": "Heuristics (Score >= 60%)",
+      "totalTrades": 165,
+      "takenTrades": 110,
+      "filterRate": 0.33333333333333337,
+      "winRate": 0.38181818181818183,
+      "avgR": 0.19420019392663668,
+      "totalR": 21.362021331930034,
+      "profitFactor": 1.3080972705082796,
+      "maxDrawdownR": 11.220227963562737
+    },
+    {
+      "name": "Heuristics (Score >= 70%)",
+      "totalTrades": 165,
+      "takenTrades": 74,
+      "filterRate": 0.5515151515151515,
+      "winRate": 0.35135135135135137,
+      "avgR": 0.13060385000927455,
+      "totalR": 9.664684900686316,
+      "profitFactor": 1.1958979056124601,
+      "maxDrawdownR": 10.335315099313691
+    },
+    {
+      "name": "Veto-Based (P(loss) <= 60%)",
+      "totalTrades": 165,
+      "takenTrades": 153,
+      "filterRate": 0.07272727272727275,
+      "winRate": 0.4117647058823529,
+      "avgR": 0.26911442058335683,
+      "totalR": 41.1745063492536,
+      "profitFactor": 1.4444821492848114,
+      "maxDrawdownR": 10.220227963562735
+    },
+    {
+      "name": "Combined (Heuristics >= 50% AND Veto Pass)",
+      "totalTrades": 165,
+      "takenTrades": 125,
+      "filterRate": 0.24242424242424243,
+      "winRate": 0.408,
+      "avgR": 0.2875541470334471,
+      "totalR": 35.94426837918089,
+      "profitFactor": 1.4808400419651944,
+      "maxDrawdownR": 7.39898489876548
+    }
+  ],
+  "recommendation": "VETO",
+  "optimalVetoThreshold": 0.6
+}

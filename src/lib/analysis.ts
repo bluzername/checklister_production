@@ -1,16 +1,22 @@
-import { 
-    AnalysisResult, 
-    AnalysisParameters, 
+import {
+    AnalysisResult,
+    AnalysisParameters,
     TradingPlan,
     MarketStatus,
     TrendStatus,
     PatternType,
     SectorRank
 } from './types';
-import YahooFinance from 'yahoo-finance2';
 import { getFundamentals, FundamentalsData } from './data-services/fmp';
 import { analyzeSentiment, SentimentData } from './data-services/sentiment';
 import { withLogging } from './data-services/logger';
+import {
+    getHistoricalPrices,
+    getQuote,
+    getProviderStatus,
+    ChartData,
+    PriceQuote
+} from './data-services/price-provider';
 import { 
     detectMarketRegime, 
     getRegimeThresholds, 
@@ -37,27 +43,48 @@ import {
 import {
     predictProbability,
     DEFAULT_COEFFICIENTS,
-    ModelCoefficients
+    ModelCoefficients,
+    getActiveCoefficients,
 } from './model';
 import { extractFeatureVector, FeatureVector } from './backtest/types';
-
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+import { computeV2Features, convertToPriceBars, PriceBar } from './trade-plan/feature-v2';
+import { evaluateVeto, type VetoResult } from './trade-plan/veto-system';
+import type { VetoAnalysis } from './types';
 
 // Model configuration - can be swapped out for trained model
-let activeModelCoefficients: ModelCoefficients = DEFAULT_COEFFICIENTS;
+// Will be lazily initialized with trained coefficients if available
+let activeModelCoefficients: ModelCoefficients | null = null;
+let coefficientsInitialized = false;
+
+/**
+ * Initialize model coefficients
+ * Loads trained coefficients if available, otherwise uses defaults
+ */
+function initializeCoefficients(): ModelCoefficients {
+    if (!coefficientsInitialized) {
+        try {
+            activeModelCoefficients = getActiveCoefficients();
+        } catch {
+            activeModelCoefficients = DEFAULT_COEFFICIENTS;
+        }
+        coefficientsInitialized = true;
+    }
+    return activeModelCoefficients || DEFAULT_COEFFICIENTS;
+}
 
 /**
  * Set the active model coefficients (for using trained models)
  */
 export function setModelCoefficients(coefficients: ModelCoefficients): void {
     activeModelCoefficients = coefficients;
+    coefficientsInitialized = true;
 }
 
 /**
  * Get current model coefficients
  */
 export function getModelCoefficients(): ModelCoefficients {
-    return activeModelCoefficients;
+    return initializeCoefficients();
 }
 
 // Sector ETF mapping
@@ -303,32 +330,29 @@ async function fetchMarketData(asOfDate?: Date): Promise<{
     try {
         const endDate = asOfDate || new Date();
         const startDate = new Date(endDate.getTime() - 250 * 24 * 60 * 60 * 1000);
-        
-        const historical = await yahooFinance.chart('SPY', {
-            period1: startDate,
-            period2: endDate,
-            interval: '1d'
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        }) as any;
-        
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let quotes = historical.quotes.filter((q: any) => q.close != null);
-        
+
+        const chartData = await getHistoricalPrices('SPY', startDate, endDate);
+
+        if (!chartData.prices || chartData.prices.length === 0) {
+            return { price: 0, sma50: 0, sma200: 0, goldenCross: false };
+        }
+
         // Filter to only include data up to asOfDate
+        let prices = chartData.prices;
         if (asOfDate) {
             const asOfTime = asOfDate.getTime();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            quotes = quotes.filter((q: any) => new Date(q.date).getTime() <= asOfTime);
+            const filteredIndices = chartData.dates
+                .map((d, i) => ({ date: new Date(d).getTime(), index: i }))
+                .filter(item => item.date <= asOfTime)
+                .map(item => item.index);
+            prices = filteredIndices.map(i => chartData.prices[i]);
         }
-        
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const prices = quotes.map((q: any) => q.close as number).reverse();
-        
+
         const price = prices[0];
         const sma50 = calculateSMA(prices, 50);
         const sma200 = calculateSMA(prices, 200);
         const goldenCross = sma50 > sma200;
-        
+
         return { price, sma50, sma200, goldenCross };
     } catch {
         return { price: 0, sma50: 0, sma200: 0, goldenCross: false };
@@ -341,30 +365,24 @@ async function fetchVIXLevel(asOfDate?: Date): Promise<number> {
         if (asOfDate) {
             // For backtesting, get historical VIX data
             const startDate = new Date(asOfDate.getTime() - 5 * 24 * 60 * 60 * 1000);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const historical = await yahooFinance.chart('^VIX', {
-                period1: startDate,
-                period2: asOfDate,
-                interval: '1d'
-            }) as any;
-            
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const quotes = historical.quotes.filter((q: any) => q.close != null);
-            if (quotes.length > 0) {
-                // Get the last quote on or before asOfDate
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const validQuotes = quotes.filter((q: any) => new Date(q.date).getTime() <= asOfDate.getTime());
-                if (validQuotes.length > 0) {
-                    return validQuotes[validQuotes.length - 1].close;
+            // FMP uses UVXY as VIX proxy, or we can use ^VIX with Yahoo fallback
+            const chartData = await getHistoricalPrices('^VIX', startDate, asOfDate);
+
+            if (chartData.prices && chartData.prices.length > 0) {
+                // Get the last price on or before asOfDate
+                const asOfTime = asOfDate.getTime();
+                for (let i = 0; i < chartData.dates.length; i++) {
+                    if (new Date(chartData.dates[i]).getTime() <= asOfTime) {
+                        return chartData.prices[i];
+                    }
                 }
             }
             return 20;
         }
-        
+
         // For live analysis, use current quote
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const quote = await yahooFinance.quote('^VIX') as any;
-        return quote?.regularMarketPrice || 20;
+        const quote = await getQuote('^VIX');
+        return quote?.price || 20;
     } catch {
         return 20; // Default moderate VIX
     }
@@ -378,46 +396,42 @@ async function fetchSectorData(sectorETF: string, asOfDate?: Date): Promise<{
     try {
         const endDate = asOfDate || new Date();
         const startDate = new Date(endDate.getTime() - 90 * 24 * 60 * 60 * 1000);
-        
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const [sectorHist, spyHist] = await Promise.all([
-            yahooFinance.chart(sectorETF, { period1: startDate, period2: endDate, interval: '1d' }),
-            yahooFinance.chart('SPY', { period1: startDate, period2: endDate, interval: '1d' })
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ]) as any[];
-        
+
+        const [sectorData, spyData] = await Promise.all([
+            getHistoricalPrices(sectorETF, startDate, endDate),
+            getHistoricalPrices('SPY', startDate, endDate)
+        ]);
+
         // Filter to only include data up to asOfDate
         const asOfTime = asOfDate ? asOfDate.getTime() : Date.now();
-        
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sectorPrices = sectorHist.quotes
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .filter((q: any) => q.close != null && new Date(q.date).getTime() <= asOfTime)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .map((q: any) => q.close)
-            .reverse();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const spyPrices = spyHist.quotes
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .filter((q: any) => q.close != null && new Date(q.date).getTime() <= asOfTime)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .map((q: any) => q.close)
-            .reverse();
-        
+
+        const filterPrices = (data: ChartData): number[] => {
+            const result: number[] = [];
+            for (let i = 0; i < data.dates.length; i++) {
+                if (new Date(data.dates[i]).getTime() <= asOfTime) {
+                    result.push(data.prices[i]);
+                }
+            }
+            return result;
+        };
+
+        const sectorPrices = filterPrices(sectorData);
+        const spyPrices = filterPrices(spyData);
+
         if (sectorPrices.length < 20 || spyPrices.length < 20) {
             return { rs20d: 1, rs60d: 1 };
         }
-        
+
         // 20-day RS
         const sector20dChange = (sectorPrices[0] - sectorPrices[19]) / sectorPrices[19] * 100;
         const spy20dChange = (spyPrices[0] - spyPrices[19]) / spyPrices[19] * 100;
         const rs20d = spy20dChange !== 0 ? sector20dChange / spy20dChange : 1;
-        
+
         // 60-day RS
         const sector60dChange = (sectorPrices[0] - sectorPrices[Math.min(59, sectorPrices.length - 1)]) / sectorPrices[Math.min(59, sectorPrices.length - 1)] * 100;
         const spy60dChange = (spyPrices[0] - spyPrices[Math.min(59, spyPrices.length - 1)]) / spyPrices[Math.min(59, spyPrices.length - 1)] * 100;
         const rs60d = spy60dChange !== 0 ? sector60dChange / spy60dChange : 1;
-        
+
         return { rs20d, rs60d };
     } catch {
         return { rs20d: 1, rs60d: 1 };
@@ -463,7 +477,8 @@ export function calculateSuccessProbability(
 
     // Try to use ML model if trained coefficients are available
     try {
-        if (activeModelCoefficients.trainingSamples > 0) {
+        const coefficients = initializeCoefficients();
+        if (coefficients.trainingSamples > 0) {
             // Build a minimal AnalysisResult for feature extraction
             const fullResult: AnalysisResult = {
                 ticker: result.ticker || 'UNKNOWN',
@@ -488,7 +503,7 @@ export function calculateSuccessProbability(
             };
 
             const features = extractFeatureVector(fullResult);
-            const modelProbability = predictProbability(features, activeModelCoefficients);
+            const modelProbability = predictProbability(features, coefficients);
             return Math.round(modelProbability * 10) / 10;
         }
     } catch (error) {
@@ -522,30 +537,30 @@ export function getRecommendation(probability: number): string {
  */
 export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<AnalysisResult> {
     const isBacktest = !!asOfDate;
-    
+
     // For backtesting, we need historical data; for live, we can use quote
     const endDate = asOfDate || new Date();
     const startDate = new Date(endDate.getTime() - 250 * 24 * 60 * 60 * 1000);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const historical = await yahooFinance.chart(ticker, {
-        period1: startDate,
-        period2: endDate,
-        interval: '1d'
-    }) as any;
+    // Fetch historical data using the unified price provider
+    const chartData = await getHistoricalPrices(ticker, startDate, endDate);
 
-    if (!historical || !historical.quotes || historical.quotes.length === 0) {
+    if (!chartData.prices || chartData.prices.length === 0) {
         throw new Error("Invalid Ticker or No Historical Data");
     }
-    
+
     // Filter historical data to only include data up to asOfDate
     const asOfTime = asOfDate ? asOfDate.getTime() : Date.now();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const filteredQuotes = historical.quotes.filter((q: any) => 
-        q.close != null && new Date(q.date).getTime() <= asOfTime
-    );
-    
-    if (filteredQuotes.length === 0) {
+
+    // Build filtered arrays for point-in-time analysis
+    const filteredIndices: number[] = [];
+    for (let i = 0; i < chartData.dates.length; i++) {
+        if (new Date(chartData.dates[i]).getTime() <= asOfTime) {
+            filteredIndices.push(i);
+        }
+    }
+
+    if (filteredIndices.length === 0) {
         throw new Error("No data available for the specified date");
     }
 
@@ -553,15 +568,13 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
     let currentPrice: number;
     let sector: string;
     let marketCap: number;
-    
+
     if (isBacktest) {
-        // Use the close price on/before asOfDate
-        currentPrice = filteredQuotes[filteredQuotes.length - 1].close;
-        // For backtesting, we need to get sector info from historical data or use a default
-        // Since Yahoo quote might not have historical sector data, we fetch current and assume it's stable
+        // Use the close price on/before asOfDate (first index is newest)
+        currentPrice = chartData.prices[filteredIndices[0]];
+        // For backtesting, we need to get sector info from quote (assume it's stable)
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const quote = await yahooFinance.quote(ticker) as any;
+            const quote = await getQuote(ticker);
             sector = quote?.sector || 'Technology';
             marketCap = quote?.marketCap ? quote.marketCap / 1_000_000_000 : 0;
         } catch {
@@ -570,41 +583,31 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
         }
     } else {
         // Live analysis - fetch current quote
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const quote = await yahooFinance.quote(ticker) as any;
-        
-        if (!quote || !quote.regularMarketPrice) {
+        const quote = await getQuote(ticker);
+
+        if (!quote || !quote.price) {
             throw new Error("Invalid Ticker or No Data Available");
         }
-        
-        currentPrice = quote.regularMarketPrice;
+
+        currentPrice = quote.price;
         sector = quote.sector || 'Technology';
         marketCap = quote.marketCap ? quote.marketCap / 1_000_000_000 : 0;
     }
 
-    // Process historical data (most recent first)
-    // Use filtered quotes for point-in-time analysis
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const validQuotes = filteredQuotes.filter((q: any) => q.close != null && q.open != null);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dates = validQuotes.map((q: any) => new Date(q.date).toISOString().split('T')[0]).reverse();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const prices = validQuotes.map((q: any) => q.close as number).reverse();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const opens = validQuotes.map((q: any) => q.open as number).reverse();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const highs = validQuotes.map((q: any) => q.high as number).reverse();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const lows = validQuotes.map((q: any) => q.low as number).reverse();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const volumes = validQuotes.map((q: any) => q.volume as number).reverse();
+    // Process historical data (already in newest-first order from price provider)
+    const dates = filteredIndices.map(i => chartData.dates[i]);
+    const prices = filteredIndices.map(i => chartData.prices[i]);
+    const opens = filteredIndices.map(i => chartData.opens[i]);
+    const highs = filteredIndices.map(i => chartData.highs[i]);
+    const lows = filteredIndices.map(i => chartData.lows[i]);
+    const volumes = filteredIndices.map(i => chartData.volumes[i]);
 
     // Fetch additional market data and premium data services in parallel
     // Pass asOfDate for point-in-time analysis
-    const [marketData, vixLevel, fundamentals, sentiment, regimeAnalysis] = await Promise.all([
+    const [marketData, vixLevel, fundamentals, sentiment, regimeAnalysis, spyChartData] = await Promise.all([
         fetchMarketData(asOfDate),
         fetchVIXLevel(asOfDate),
-        getFundamentals(ticker),
+        getFundamentals(ticker, asOfDate), // PIT safety: pass asOfDate for backtesting
         // For backtesting, skip sentiment analysis (Claude can't see historical news)
         isBacktest ? Promise.resolve({
             sentiment_score: 0,
@@ -616,7 +619,9 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
             confidence: 0,
             data_available: false,
         }) : analyzeSentiment(ticker),
-        detectMarketRegime(asOfDate)
+        detectMarketRegime(asOfDate),
+        // Fetch SPY OHLCV data for veto model features
+        getHistoricalPrices('SPY', startDate, endDate)
     ]);
     
     // Get regime-adjusted thresholds
@@ -813,7 +818,7 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
     // ============================================
     const nearEma20 = Math.abs(currentPrice - ema20) / ema20 <= 0.03;
     const nearEma50 = Math.abs(currentPrice - ema50) / ema50 <= 0.03;
-    const stopLossLevel = swingLow - (0.01 * atr);
+    const stopLossLevel = swingLow - (0.025 * atr);  // WIDENED: 2.5% ATR buffer to reduce false stops
     const risk = currentPrice - stopLossLevel;
     const takeProfitLevel = currentPrice + (2 * risk);
     const rrRatio = risk > 0 ? (takeProfitLevel - currentPrice) / risk : 0;
@@ -922,6 +927,10 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
     const positiveMomentum = rsi > 50;
     const overextended = rsi > adaptiveRSI.thresholds.overbought;
     const optimalRange = adaptiveRSI.zone === 'OPTIMAL_BUY';
+
+    // MEAN REVERSION: Buy oversold conditions (RSI < 35)
+    const meanReversionSignal = rsi <= 35;
+    const deeplyOversold = rsi <= 25;  // Very strong buy signal
     
     // ============================================
     // BUILD PARAMETERS OBJECT
@@ -1064,7 +1073,8 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
         ticker,
         successProbability / 10, // Convert to 0-10 scale
         trendStatus,
-        regimeAnalysis.regime
+        regimeAnalysis.regime,
+        asOfDate // PIT safety: pass asOfDate for backtesting
     );
     const hasMTFConfirm = has4HConfirmation(mtfAnalysis);
     
@@ -1110,6 +1120,30 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
     if (regimeAnalysis.regime === 'BULL' && successProbability >= 75 && volumeConfirms) {
         adjustedProbability = Math.min(100, adjustedProbability + 5);
         regimeAdjusted = true;
+    }
+
+    // ============================================
+    // MEAN REVERSION STRATEGY ADJUSTMENTS
+    // ============================================
+    const hasBullishDivergence = divergenceAnalysis.strongest.type === 'REGULAR_BULLISH';
+    const hasHiddenBullishDivergence = divergenceAnalysis.strongest.type === 'HIDDEN_BULLISH';
+    const anyBullishDivergence = hasBullishDivergence || hasHiddenBullishDivergence;
+
+    // MEAN REVERSION BOOST: Oversold conditions are bullish
+    if (meanReversionSignal) {  // RSI <= 35
+        adjustedProbability = Math.min(100, adjustedProbability + 10);  // +10% boost
+        regimeAdjusted = true;
+
+        // Extra boost for deeply oversold + divergence
+        if (deeplyOversold && anyBullishDivergence) {  // RSI <= 25 + divergence
+            adjustedProbability = Math.min(100, adjustedProbability + 10);  // Additional +10%
+        }
+    }
+
+    // DIVERGENCE CONFIRMATION: Required when RSI is not deeply oversold
+    if (rsi > 35 && !anyBullishDivergence) {
+        // If RSI is not oversold and no divergence, reduce confidence
+        adjustedProbability = Math.max(0, adjustedProbability - 5);
     }
     
     // Phase 2: Apply multi-timeframe adjustments
@@ -1196,17 +1230,77 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
         });
     }
 
+    // ============================================
+    // VETO ANALYSIS (ML-based timing filter)
+    // ============================================
+    let vetoAnalysis: VetoAnalysis | undefined;
+
+    try {
+        // Convert price arrays to PriceBar format for v2 feature computation
+        const tickerBars = convertToPriceBars(dates, opens, highs, lows, prices, volumes);
+
+        // Convert SPY data to PriceBar format
+        let spyBars: PriceBar[] | undefined;
+        if (spyChartData && spyChartData.prices && spyChartData.prices.length > 50) {
+            // Filter SPY data to asOfDate if backtesting
+            const spyDates = asOfDate
+                ? spyChartData.dates.filter(d => new Date(d).getTime() <= asOfTime)
+                : spyChartData.dates;
+            const spyIndices = spyDates.map(d => spyChartData.dates.indexOf(d));
+
+            spyBars = convertToPriceBars(
+                spyIndices.map(i => spyChartData.dates[i]),
+                spyIndices.map(i => spyChartData.opens[i]),
+                spyIndices.map(i => spyChartData.highs[i]),
+                spyIndices.map(i => spyChartData.lows[i]),
+                spyIndices.map(i => spyChartData.prices[i]),
+                spyIndices.map(i => spyChartData.volumes[i])
+            );
+        }
+
+        // Compute v2 features and run veto analysis
+        const v2Features = computeV2Features(tickerBars, spyBars);
+        const vetoResult = evaluateVeto(v2Features as unknown as Record<string, number>, ticker, dates[0], { vetoThreshold: 0.60 });
+
+        vetoAnalysis = {
+            vetoed: vetoResult.vetoed,
+            pLoss: vetoResult.pLoss,
+            pWin: vetoResult.pWin,
+            verdict: vetoResult.verdict,
+            confidence: vetoResult.confidence,
+            reasons: vetoResult.reasons,
+        };
+    } catch (error) {
+        // Veto model not available or error - continue without veto analysis
+        console.warn('Veto analysis unavailable:', error);
+    }
+
+    // Determine final trade type based on veto analysis
+    const baseTradeType = isUptrend && adjustedProbability >= 60 && effectiveRRPasses ? "SWING_LONG" : "AVOID";
+    const finalTradeType = vetoAnalysis?.vetoed ? "AVOID" : baseTradeType;
+
+    // Adjust recommendation based on veto
+    let finalRecommendation = regimeAdjusted ? adjustedRecommendation : getRecommendation(adjustedProbability);
+    if (vetoAnalysis?.vetoed) {
+        finalRecommendation = `VETO - Poor timing (${(vetoAnalysis.pLoss * 100).toFixed(0)}% loss probability)`;
+    } else if (vetoAnalysis?.verdict === 'CAUTION') {
+        finalRecommendation = `CAUTION - ${finalRecommendation} (${(vetoAnalysis.pLoss * 100).toFixed(0)}% loss probability)`;
+    }
+
     return {
         ticker: ticker.toUpperCase(),
         timestamp: new Date().toISOString(),
         current_price: currentPrice,
         timeframe: "Daily",
-        trade_type: isUptrend && adjustedProbability >= 60 && effectiveRRPasses ? "SWING_LONG" : "AVOID",
+        trade_type: finalTradeType,
         parameters,
         success_probability: adjustedProbability,
         confidence_rating: getConfidenceRating(adjustedProbability),
-        recommendation: regimeAdjusted ? adjustedRecommendation : getRecommendation(adjustedProbability),
+        recommendation: finalRecommendation,
         trading_plan: tradingPlan,
+
+        // ML-based Veto System (replaces heuristics for timing decisions)
+        veto_analysis: vetoAnalysis,
         risk_analysis: {
             downside_risk: `Stop loss at $${stopLoss.toFixed(2)}`,
             risk_per_unit: risk,

@@ -202,6 +202,16 @@ export interface QualitativeAssessment {
   monitoring_points: string[];
 }
 
+// Veto System (ML-based timing filter)
+export interface VetoAnalysis {
+  vetoed: boolean;
+  pLoss: number;              // P(loss) from ML model
+  pWin: number;               // P(win) = 1 - pLoss
+  verdict: 'PROCEED' | 'CAUTION' | 'VETO';
+  confidence: 'low' | 'medium' | 'high' | 'very_high';
+  reasons: string[];
+}
+
 export interface AnalysisResult {
   ticker: string;
   timestamp: string;
@@ -213,6 +223,9 @@ export interface AnalysisResult {
   confidence_rating: string;
   recommendation: string;
   trading_plan: TradingPlan;
+
+  // ML-based Veto System (replaces heuristics for timing)
+  veto_analysis?: VetoAnalysis;
   risk_analysis: RiskAnalysis;
   qualitative_assessment: QualitativeAssessment;
   disclaimers: string[];
