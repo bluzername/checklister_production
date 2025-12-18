@@ -15,8 +15,66 @@ import {
   ExitReason,
   extractFeatureVector,
 } from './types';
-import { calculateMetrics, calculateEquityCurve } from './metrics';
+import { calculateMetrics } from './metrics';
 import { TradeManager } from './trade-manager';
+import {
+  enablePITEnforcement,
+  disablePITEnforcement,
+  printPITEnforcementSummary,
+} from '../ml/pit-enforcement';
+import YahooFinance from 'yahoo-finance2';
+
+const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+
+// ============================================
+// RATE LIMITING UTILITIES
+// ============================================
+
+/**
+ * Delay execution for specified milliseconds
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Retry with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> {
+  let lastError: Error | unknown;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxRetries - 1) {
+        const waitTime = baseDelay * Math.pow(2, attempt);
+        console.log(`  Retry ${attempt + 1}/${maxRetries} after ${waitTime}ms...`);
+        await delay(waitTime);
+      }
+    }
+  }
+  
+  throw lastError;
+}
+
+// Rate limiting configuration
+const RATE_LIMIT_DELAY_MS = 200; // Delay between API calls
+const BATCH_SIZE = 5; // Process tickers in batches
+const BATCH_DELAY_MS = 1000; // Delay between batches
+const PREFETCH_BATCH_SIZE = 5;
+
+// Yahoo Finance symbol quirks
+const SYMBOL_MAP: Record<string, string> = {
+  'BRK.B': 'BRK-B',
+  'BRK.A': 'BRK-A',
+  'BF.B': 'BF-B',
+};
 
 // ============================================
 // SIMULATOR CLASS
@@ -30,6 +88,10 @@ export class BacktestSimulator {
   private equityHistory: EquityPoint[] = [];
   private currentDate: Date;
   private tradeIdCounter: number = 0;
+  private priceCache = new Map<string, Map<string, { open: number; high: number; low: number; close: number }>>();
+  private dailyPriceCache = new Map<string, { open?: number; high: number; low: number; close: number }>();
+  // Track when tickers were last exited for re-entry cooldown
+  private tickerExitDates = new Map<string, Date>();
 
   constructor(config: BacktestConfig) {
     this.config = config;
@@ -45,6 +107,13 @@ export class BacktestSimulator {
     console.log(`Starting backtest: ${this.config.name}`);
     console.log(`Period: ${this.config.startDate} to ${this.config.endDate}`);
     console.log(`Universe: ${this.getUniverseSize()} tickers`);
+
+    // Enable PIT safety enforcement for backtests
+    // This ensures all analysis uses asOfDate and no look-ahead bias occurs
+    enablePITEnforcement();
+
+    // Preload historical prices for the universe to reduce per-day fetch churn
+    await this.prefetchPriceHistory(this.getUniverse());
 
     const startTime = Date.now();
     const endDate = new Date(this.config.endDate);
@@ -70,10 +139,11 @@ export class BacktestSimulator {
 
     // Close any remaining open positions at end
     await this.closeAllPositions(endDate, 'TIME_EXIT');
+    this.recordEquity(endDate);
 
     const completedAt = new Date().toISOString();
-    const metrics = calculateMetrics(this.trades, this.config.initialCapital);
-    const equityCurve = calculateEquityCurve(this.trades, this.config.initialCapital);
+    const metrics = calculateMetrics(this.trades, this.config.initialCapital, this.equityHistory);
+    const equityCurve = this.equityHistory;
 
     // Calculate performance breakdowns
     const performanceByRegime = this.calculatePerformanceByRegime();
@@ -86,6 +156,10 @@ export class BacktestSimulator {
     console.log(`Total trades: ${this.trades.length}`);
     console.log(`Win rate: ${metrics.winRate.toFixed(1)}%`);
     console.log(`Sharpe ratio: ${metrics.sharpeRatio.toFixed(2)}`);
+
+    // Print PIT safety summary and disable enforcement
+    printPITEnforcementSummary();
+    disablePITEnforcement();
 
     return {
       config: this.config,
@@ -107,6 +181,7 @@ export class BacktestSimulator {
    */
   private async processDay(date: Date): Promise<void> {
     const dateStr = date.toISOString().split('T')[0];
+    this.dailyPriceCache = new Map();
     
     // 1. Update open positions with current prices and check exits
     await this.updateOpenPositions(date);
@@ -120,44 +195,66 @@ export class BacktestSimulator {
 
   /**
    * Update open positions and check for exits
+   * Includes rate limiting for price data fetches
    */
   private async updateOpenPositions(date: Date): Promise<void> {
     const openTrades = this.trades.filter(t => t.status === 'OPEN');
 
-    for (const trade of openTrades) {
-      try {
-        // Get current price data for the ticker
-        const priceData = await this.getPriceData(trade.ticker, date);
-        
-        if (!priceData) continue;
+    // Process open trades in batches to avoid rate limiting
+    for (let i = 0; i < openTrades.length; i += BATCH_SIZE) {
+      const batch = openTrades.slice(i, i + BATCH_SIZE);
+      
+      await Promise.all(
+        batch.map(async (trade) => {
+          try {
+            // Get current price data for the ticker with retry
+            const priceData = await retryWithBackoff(
+              () => this.getPriceData(trade.ticker, date),
+              2,
+              500
+            );
+            
+            if (!priceData) return;
 
-        const { high, low, close } = priceData;
+            const { high, low, close } = priceData;
+            this.dailyPriceCache.set(trade.ticker, priceData);
 
-        // Update MFE/MAE
-        if (high > (trade.mfe || trade.entryPrice)) {
-          trade.mfe = high;
-          trade.mfeR = (high - trade.entryPrice) / (trade.entryPrice - trade.stopLoss);
-        }
-        if (low < (trade.mae || trade.entryPrice)) {
-          trade.mae = low;
-          trade.maeR = (trade.entryPrice - low) / (trade.entryPrice - trade.stopLoss);
-        }
+            // Update MFE/MAE
+            if (high > (trade.mfe || trade.entryPrice)) {
+              trade.mfe = high;
+              trade.mfeR = (high - trade.entryPrice) / (trade.entryPrice - trade.stopLoss);
+            }
+            if (low < (trade.mae || trade.entryPrice)) {
+              trade.mae = low;
+              trade.maeR = (trade.entryPrice - low) / (trade.entryPrice - trade.stopLoss);
+            }
 
-        // Check exit conditions
-        const exitResult = this.tradeManager.checkExit(trade, high, low, close, date);
-        
-        if (exitResult.shouldExit) {
-          this.closeTrade(trade, date, exitResult.exitPrice, exitResult.exitReason);
-        }
-      } catch (error) {
-        // If we can't get price data, skip this ticker for today
-        console.warn(`Could not get price data for ${trade.ticker} on ${date.toISOString().split('T')[0]}`);
+            // Check exit conditions
+            const exitResult = this.tradeManager.checkExit(trade, high, low, close, date);
+
+            // Handle partial exits (TP1, TP2 scale-outs)
+            if (exitResult.isPartialExit && exitResult.partialShares && exitResult.partialShares > 0) {
+              this.executePartialExit(trade, date, exitResult.exitPrice, exitResult.exitReason, exitResult.partialShares);
+            } else if (exitResult.shouldExit) {
+              this.closeTrade(trade, date, exitResult.exitPrice, exitResult.exitReason);
+            }
+          } catch (error) {
+            // If we can't get price data after retries, skip this ticker for today
+            // Don't log - it creates too much noise
+          }
+        })
+      );
+
+      // Rate limiting delay between batches
+      if (i + BATCH_SIZE < openTrades.length) {
+        await delay(RATE_LIMIT_DELAY_MS * 2);
       }
     }
   }
 
   /**
    * Scan universe for new entry signals
+   * Includes rate limiting to avoid API throttling
    */
   private async scanForEntries(date: Date): Promise<void> {
     const universe = this.getUniverse();
@@ -171,23 +268,60 @@ export class BacktestSimulator {
       return;
     }
 
-    // Analyze each ticker in universe
+    // Filter to tickers we need to analyze (exclude open positions and those in cooldown)
+    const cooldownDays = this.config.reEntryCooldownDays ?? 5;
+    const tickersToScan = universe.filter(t => {
+      // Skip if already has open position
+      if (openPositionTickers.has(t)) return false;
+
+      // Skip if in cooldown period
+      const lastExit = this.tickerExitDates.get(t);
+      if (lastExit) {
+        const daysSinceExit = Math.floor((date.getTime() - lastExit.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysSinceExit < cooldownDays) return false;
+      }
+
+      return true;
+    });
+    
+    // Analyze each ticker in universe with rate limiting
     const candidates: { ticker: string; analysis: AnalysisResult }[] = [];
+    let processedCount = 0;
 
-    for (const ticker of universe) {
-      // Skip if already have position
-      if (openPositionTickers.has(ticker)) continue;
+    // Process in batches to avoid rate limiting
+    for (let i = 0; i < tickersToScan.length; i += BATCH_SIZE) {
+      const batch = tickersToScan.slice(i, i + BATCH_SIZE);
+      
+      // Process batch in parallel
+      const batchResults = await Promise.allSettled(
+        batch.map(async (ticker) => {
+          try {
+            const analysis = await retryWithBackoff(
+              () => analyzeTicker(ticker, date),
+              2, // max retries
+              500 // base delay
+            );
+            return { ticker, analysis };
+          } catch (error) {
+            return null;
+          }
+        })
+      );
 
-      try {
-        const analysis = await analyzeTicker(ticker, date);
-        
-        // Check if meets entry criteria
-        if (this.meetsEntryCriteria(analysis)) {
-          candidates.push({ ticker, analysis });
+      // Collect successful results
+      for (const result of batchResults) {
+        if (result.status === 'fulfilled' && result.value) {
+          const { ticker, analysis } = result.value;
+          if (this.meetsEntryCriteria(analysis)) {
+            candidates.push({ ticker, analysis });
+          }
         }
-      } catch (error) {
-        // Skip tickers that fail analysis
-        continue;
+        processedCount++;
+      }
+
+      // Rate limiting delay between batches
+      if (i + BATCH_SIZE < tickersToScan.length) {
+        await delay(BATCH_DELAY_MS);
       }
     }
 
@@ -198,9 +332,10 @@ export class BacktestSimulator {
     const slotsAvailable = this.config.maxOpenPositions - openPositionCount;
     const toEnter = candidates.slice(0, slotsAvailable);
 
-    // Enter positions
+    // Enter positions with delay between entries
     for (const { ticker, analysis } of toEnter) {
       await this.enterTrade(ticker, analysis, date);
+      await delay(RATE_LIMIT_DELAY_MS);
     }
   }
 
@@ -238,6 +373,54 @@ export class BacktestSimulator {
       }
     }
 
+    // VIX filter: Avoid entries when volatility is elevated
+    // Configurable via maxVixLevel (default: 22 for Option A baseline)
+    const vixLevel = analysis.parameters['1_market_condition']?.vix_level ?? 20;
+    const maxVixLevel = this.config.maxVixLevel ?? 22;
+    if (vixLevel > maxVixLevel) {
+      return false;
+    }
+
+    // Sector filter: Only enter when sector is performing well (RS > 0.95)
+    const sectorRS = analysis.parameters['2_sector_condition']?.rs_score_20d ?? 1.0;
+    if (sectorRS < 0.95) {
+      return false;
+    }
+
+    // ============================================
+    // MEAN REVERSION / REGIME-SPECIFIC FILTERS
+    // ============================================
+    const rsiValue = analysis.parameters['10_rsi']?.value ?? 50;
+    const divergenceType = analysis.divergence?.type ?? 'NONE';
+    const hasBullishDivergence = divergenceType === 'REGULAR_BULLISH' || divergenceType === 'HIDDEN_BULLISH';
+    const regime = analysis.market_regime?.regime ?? 'BULL';
+
+    // Regime-specific entry requirements
+    if (regime === 'BULL') {
+      // BULL regime: Prefer mean reversion (RSI < 40) or divergence
+      if (rsiValue > 50 && !hasBullishDivergence) {
+        return false;  // Don't chase overbought in BULL without divergence
+      }
+    } else if (regime === 'CHOPPY') {
+      // CHOPPY regime: Only deeply oversold with divergence
+      if (rsiValue > 35 || !hasBullishDivergence) {
+        return false;  // Very strict in choppy markets
+      }
+    }
+    // CRASH regime is already filtered by VIX and probability
+
+    // ============================================
+    // OPTION C: TIGHTER FILTERING (IMPLEMENTED)
+    // ============================================
+    // Option B (pullback + quality filter) tested on 2025-12-14 - HURT performance
+    // (Sharpe dropped 0.27 → 0.15, PF dropped 1.02 → 0.96)
+    //
+    // Option C takes a simpler approach - only trade highest quality setups:
+    // [x] VIX filter tightened to 18 (from 22) - line 348
+    // [x] Entry threshold increased to 70% (from 60%) - getDefaultConfig()
+    //
+    // Expected outcome: Fewer trades but higher win rate
+
     return true;
   }
 
@@ -254,9 +437,20 @@ export class BacktestSimulator {
     const risk = entryPrice - stopLoss;
 
     // Calculate position size based on risk
-    const riskDollars = this.equity * this.config.riskPerTrade;
-    const shares = Math.floor(riskDollars / risk);
-    
+    // Use initial capital (not current equity) to prevent runaway compounding
+    const useInitialCapital = this.config.useInitialCapitalForSizing ?? true;
+    const sizingCapital = useInitialCapital ? this.config.initialCapital : this.equity;
+    const riskDollars = sizingCapital * this.config.riskPerTrade;
+    let shares = Math.floor(riskDollars / risk);
+
+    if (shares <= 0) return;
+
+    // Apply max position size cap (default 15% of initial capital)
+    const maxPositionPercent = this.config.maxPositionPercent ?? 0.15;
+    const maxPositionValue = this.config.initialCapital * maxPositionPercent;
+    const maxSharesByValue = Math.floor(maxPositionValue / entryPrice);
+    shares = Math.min(shares, maxSharesByValue);
+
     if (shares <= 0) return;
 
     const positionValue = shares * entryPrice;
@@ -278,6 +472,7 @@ export class BacktestSimulator {
       entryPrice: adjustedEntryPrice,
       entryProbability: analysis.success_probability,
       shares,
+      initialShares: shares, // Track original position size for proper TP tranche sizing
       positionValue,
       stopLoss,
       tp1,
@@ -291,6 +486,12 @@ export class BacktestSimulator {
 
     this.trades.push(trade);
     this.equity -= positionValue + (shares * this.config.commissionPerShare);
+
+    // Track today's close for mark-to-market if available
+    const todaysPrice = await this.getPriceData(ticker, date);
+    if (todaysPrice) {
+      this.dailyPriceCache.set(ticker, todaysPrice);
+    }
   }
 
   /**
@@ -311,21 +512,93 @@ export class BacktestSimulator {
     trade.exitReason = exitReason;
     trade.status = 'CLOSED';
 
-    // Calculate performance
+    // Record exit date for re-entry cooldown
+    this.tickerExitDates.set(trade.ticker, date);
+
+    // Calculate PnL for remaining shares
+    const finalPnl = (adjustedExitPrice - trade.entryPrice) * trade.shares;
+
+    // Sum up partial exit PnLs (if any)
+    const partialPnl = trade.partialExits?.reduce((sum, p) => sum + p.pnl, 0) || 0;
+
+    // Total realized PnL is partial exits + final exit
+    trade.realizedPnl = partialPnl + finalPnl;
+
+    // Use tracked initialShares for percentage calculations
+    const initialShares = trade.initialShares;
+
+    // Calculate performance based on total position
     const risk = trade.entryPrice - trade.stopLoss;
-    trade.realizedPnl = (adjustedExitPrice - trade.entryPrice) * trade.shares;
-    trade.realizedPnlPercent = ((adjustedExitPrice - trade.entryPrice) / trade.entryPrice) * 100;
-    trade.realizedR = risk > 0 ? (adjustedExitPrice - trade.entryPrice) / risk : 0;
+    const totalInvested = trade.entryPrice * initialShares;
+    trade.realizedPnlPercent = totalInvested > 0 ? (trade.realizedPnl / totalInvested) * 100 : 0;
+
+    // Calculate blended R (weighted average of all exit prices)
+    if (risk > 0 && initialShares > 0) {
+      // Calculate weighted average exit price
+      let totalExitValue = adjustedExitPrice * trade.shares;
+      if (trade.partialExits) {
+        totalExitValue += trade.partialExits.reduce((sum, p) => sum + p.price * p.shares, 0);
+      }
+      const avgExitPrice = totalExitValue / initialShares;
+      trade.realizedR = (avgExitPrice - trade.entryPrice) / risk;
+    } else {
+      trade.realizedR = 0;
+    }
 
     // Calculate holding days
     const entryMs = new Date(trade.entryDate).getTime();
     const exitMs = date.getTime();
     trade.holdingDays = Math.ceil((exitMs - entryMs) / (1000 * 60 * 60 * 24));
 
-    // Update equity
+    // Update equity with remaining shares
     const exitValue = trade.shares * adjustedExitPrice;
     const commission = trade.shares * this.config.commissionPerShare;
     this.equity += exitValue - commission;
+  }
+
+  /**
+   * Execute a partial exit (TP1 or TP2 scale-out)
+   * Does not close the trade, only reduces position size
+   */
+  private executePartialExit(
+    trade: BacktestTrade,
+    date: Date,
+    exitPrice: number,
+    exitReason: ExitReason,
+    sharesToSell: number
+  ): void {
+    // Ensure we don't sell more than we have
+    const actualSharestoSell = Math.min(sharesToSell, trade.shares);
+    if (actualSharestoSell <= 0) return;
+
+    // Apply slippage to exit
+    const slippage = exitPrice * (this.config.slippagePercent / 100);
+    const adjustedExitPrice = exitPrice - slippage;
+
+    // Calculate PnL for this partial exit
+    const partialPnl = (adjustedExitPrice - trade.entryPrice) * actualSharestoSell;
+
+    // Initialize partialExits array if needed
+    if (!trade.partialExits) {
+      trade.partialExits = [];
+    }
+
+    // Record the partial exit
+    trade.partialExits.push({
+      date: date.toISOString().split('T')[0],
+      price: adjustedExitPrice,
+      shares: actualSharestoSell,
+      reason: exitReason,
+      pnl: partialPnl,
+    });
+
+    // Update equity with partial exit proceeds
+    const exitValue = actualSharestoSell * adjustedExitPrice;
+    const commission = actualSharestoSell * this.config.commissionPerShare;
+    this.equity += exitValue - commission;
+
+    // Reduce remaining position size
+    trade.shares -= actualSharestoSell;
   }
 
   /**
@@ -339,6 +612,8 @@ export class BacktestSimulator {
         const priceData = await this.getPriceData(trade.ticker, date);
         if (priceData) {
           this.closeTrade(trade, date, priceData.close, reason);
+        } else {
+          this.closeTrade(trade, date, trade.entryPrice, reason);
         }
       } catch {
         // Use last known price or entry price
@@ -357,17 +632,25 @@ export class BacktestSimulator {
     );
 
     const dailyPnl = closedToday.reduce((sum, t) => sum + (t.realizedPnl || 0), 0);
+
+    // Mark to market open positions using today's close (fallback to entry)
+    const openMarketValue = openTrades.reduce((sum, trade) => {
+      const closePrice = this.dailyPriceCache.get(trade.ticker)?.close ?? trade.entryPrice;
+      return sum + closePrice * trade.shares;
+    }, 0);
+
+    const totalEquity = this.equity + openMarketValue;
     const prevEquity = this.equityHistory[this.equityHistory.length - 1]?.equity || this.config.initialCapital;
-    const dailyReturn = prevEquity > 0 ? (dailyPnl / prevEquity) * 100 : 0;
+    const dailyReturn = prevEquity > 0 ? ((totalEquity - prevEquity) / prevEquity) * 100 : 0;
 
     // Calculate drawdown
-    const peakEquity = Math.max(...this.equityHistory.map(e => e.equity), this.equity);
-    const drawdown = peakEquity - this.equity;
+    const peakEquity = Math.max(...this.equityHistory.map(e => e.equity), totalEquity);
+    const drawdown = peakEquity - totalEquity;
     const drawdownPercent = peakEquity > 0 ? (drawdown / peakEquity) * 100 : 0;
 
     this.equityHistory.push({
       date: date.toISOString().split('T')[0],
-      equity: this.equity,
+      equity: totalEquity,
       drawdown,
       drawdownPercent,
       openPositions: openTrades.length,
@@ -383,28 +666,96 @@ export class BacktestSimulator {
     ticker: string,
     date: Date
   ): Promise<{ high: number; low: number; close: number } | null> {
+    const dateStr = date.toISOString().split('T')[0];
+
     try {
-      // Use analyzeTicker to get price data (it fetches historical data)
-      const analysis = await analyzeTicker(ticker, date);
-      
-      // Extract OHLC from chart_data or use current_price
-      const chartData = analysis.chart_data;
-      if (chartData && chartData.length > 0) {
-        const todayData = chartData[0]; // Most recent
-        return {
-          high: todayData.price * 1.02, // Approximate high
-          low: todayData.price * 0.98, // Approximate low
-          close: todayData.price,
-        };
+      if (!this.priceCache.has(ticker)) {
+        await this.loadPriceHistory(ticker);
       }
-      
-      return {
-        high: analysis.current_price * 1.02,
-        low: analysis.current_price * 0.98,
-        close: analysis.current_price,
-      };
+
+      const tickerCache = this.priceCache.get(ticker);
+      if (!tickerCache) return null;
+
+      // Exact match for the trading day
+      if (tickerCache.has(dateStr)) {
+        const bar = tickerCache.get(dateStr)!;
+        return { high: bar.high, low: bar.low, close: bar.close };
+      }
+
+      // Fallback: use most recent prior trading day (holidays)
+      const priorDates = Array.from(tickerCache.keys()).filter(d => d < dateStr).sort();
+      const fallbackDate = priorDates[priorDates.length - 1];
+      if (fallbackDate) {
+        const bar = tickerCache.get(fallbackDate)!;
+        return { high: bar.high, low: bar.low, close: bar.close };
+      }
+
+      return null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Load historical OHLC data for a ticker over the backtest window
+   */
+  private async loadPriceHistory(ticker: string): Promise<void> {
+    const symbol = SYMBOL_MAP[ticker] || ticker.replace('.', '-');
+    const period1 = new Date(this.config.startDate);
+    const period2 = new Date(this.config.endDate);
+    period2.setDate(period2.getDate() + 1); // include end date
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await yahooFinance.chart(symbol, {
+        period1,
+        period2,
+        interval: '1d',
+      } as any) as any;
+
+      const quotes = result?.quotes || [];
+      const map = new Map<string, { open: number; high: number; low: number; close: number }>();
+
+      for (const q of quotes) {
+        if (!q || q.open == null || q.high == null || q.low == null || q.close == null || !q.date) continue;
+        const quoteDate = new Date(q.date).toISOString().split('T')[0];
+        map.set(quoteDate, {
+          open: q.open,
+          high: q.high,
+          low: q.low,
+          close: q.close,
+        });
+      }
+
+      this.priceCache.set(ticker, map);
+    } catch (error) {
+      // If no data, cache empty and move on quietly
+      if ((error as Error)?.message?.includes('No data found')) {
+        this.priceCache.set(ticker, new Map());
+        return;
+      }
+      console.warn(`Failed to load price history for ${ticker}:`, error);
+      this.priceCache.set(ticker, new Map());
+    }
+  }
+
+  /**
+   * Prefetch historical prices for a list of tickers with simple batching
+   */
+  private async prefetchPriceHistory(tickers: string[]): Promise<void> {
+    for (let i = 0; i < tickers.length; i += PREFETCH_BATCH_SIZE) {
+      const batch = tickers.slice(i, i + PREFETCH_BATCH_SIZE);
+
+      await Promise.all(
+        batch.map(async (ticker) => {
+          if (this.priceCache.has(ticker)) return;
+          await this.loadPriceHistory(ticker);
+        })
+      );
+
+      if (i + PREFETCH_BATCH_SIZE < tickers.length) {
+        await delay(RATE_LIMIT_DELAY_MS);
+      }
     }
   }
 
@@ -576,21 +927,17 @@ export function createDefaultConfig(
     riskPerTrade: 0.01, // 1%
     maxTotalRisk: 0.06, // 6%
     maxOpenPositions: 10,
-    entryThreshold: 65,
-    minRRRatio: 2.0,
+    entryThreshold: 70,  // OPTION C: Increased from 60 to 70 for higher quality entries
+    minRRRatio: 1.5,     // Optimized: Lower R:R captures more winning trades
     requireVolumeConfirm: false,
     requireMTFAlign: false,
     tpRatios: [1.5, 2.5, 4.0],
     tpSizes: [0.33, 0.33, 0.34],
-    maxHoldingDays: 20,
-    useTrailingStop: false,
+    maxHoldingDays: 45,
+    useTrailingStop: true,  // ENABLED: Protect profits with trailing stop
     slippagePercent: 0.1,
     commissionPerShare: 0.005,
     gapHandling: 'MARKET',
     adjustForRegime: true,
   };
 }
-
-
-
-

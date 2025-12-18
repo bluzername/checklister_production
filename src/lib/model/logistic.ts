@@ -47,8 +47,8 @@ export const DEFAULT_COEFFICIENTS: ModelCoefficients = {
     spy_above_200sma: 0.40,
     golden_cross: 0.20,
     
-    // Technical indicators
-    rsi_value: 0.01,
+    // Technical indicators - MEAN REVERSION: Low RSI is bullish
+    rsi_value: -0.15,  // NEGATIVE: Lower RSI = higher buy signal (mean reversion)
     atr_percent: -0.10, // Higher volatility = more risk
     price_vs_200sma: 0.02,
     price_vs_50sma: 0.02,
@@ -73,9 +73,9 @@ export const DEFAULT_COEFFICIENTS: ModelCoefficients = {
     mtf_combined_score: 0.15,
     mtf_alignment: 0.30,
     
-    // Divergence
-    divergence_type: 0.15,
-    divergence_strength: 0.10,
+    // Divergence - CRITICAL for mean reversion entries
+    divergence_type: 0.35,  // INCREASED: Bullish divergence is key signal
+    divergence_strength: 0.20,  // INCREASED: Stronger divergence = better signal
     
     // Pattern
     pattern_type: 0.20,
@@ -87,6 +87,31 @@ export const DEFAULT_COEFFICIENTS: ModelCoefficients = {
     higher_highs: 0.20,
     higher_lows: 0.25,
     trend_status: 0.25,
+
+    // ============================================
+    // MACRO / SENTIMENT FEATURES (Phase 5.1.4)
+    // ============================================
+
+    // Seasonality (most have weak historical effects, small initial weights)
+    day_of_week: 0.02, // Monday effect: Mondays historically weaker
+    month_of_year: 0.01, // Weak seasonal patterns
+    quarter: 0.02, // Q4 historically stronger
+    is_earnings_season: 0.10, // Higher volatility during earnings
+    is_month_start: 0.05, // Fund flows at month start
+    is_month_end: 0.05, // Fund flows at month end
+    is_year_start: 0.10, // January effect
+
+    // VIX context
+    vix_percentile: -0.02, // Higher VIX percentile = more risk
+    vix_regime: -0.10, // Higher VIX regime = more risk
+
+    // Market momentum context - MEAN REVERSION adjustments
+    spy_10d_return: 0.05, // REDUCED: Less focus on momentum
+    spy_20d_return: 0.05, // REDUCED: Less focus on momentum
+    spy_rsi: -0.10, // NEGATIVE: Market oversold is bullish (mean reversion)
+
+    // Breadth indicators
+    sector_momentum: 0.15, // Positive sector momentum is bullish
   },
   // Mean/std for normalization (initialized to defaults)
   featureMeans: {} as Record<keyof FeatureVector, number>,
@@ -162,26 +187,250 @@ export interface TrainingExample {
 }
 
 /**
+ * Initialization strategies for model weights
+ */
+export type InitStrategy = 'default' | 'zero' | 'random' | 'xavier' | 'small_random';
+
+/**
+ * Training options
+ */
+export type RegularizationType = 'L1' | 'L2' | 'elastic';
+
+/**
+ * Class weight options for handling imbalanced data
+ * - 'balanced': Auto-compute inverse frequency weights (n_samples / (n_classes * n_class_samples))
+ * - { positive: number, negative: number }: Manual weights for each class
+ */
+export type ClassWeightOption = 'none' | 'balanced' | { positive: number; negative: number };
+
+export interface TrainingOptions {
+  learningRate?: number;
+  iterations?: number;
+  regularization?: number;
+  regularizationType?: RegularizationType;  // L1, L2, or elastic net
+  elasticRatio?: number;  // For elastic net: 0 = pure L2, 1 = pure L1
+  initStrategy?: InitStrategy;
+  momentum?: number;  // Momentum for gradient descent
+  seed?: number;      // Random seed for reproducibility
+  lrSchedule?: 'constant' | 'step' | 'exponential' | 'cosine';  // Learning rate schedule
+  lrDecay?: number;   // Decay factor for scheduled LR
+  lrStepSize?: number;  // Step size for step decay
+  classWeight?: ClassWeightOption;  // Handle class imbalance (Phase 5.1.3)
+}
+
+/**
+ * Compute class weights for handling imbalanced data
+ * Returns weight multiplier for each class
+ */
+export function computeClassWeights(
+  data: TrainingExample[],
+  option: ClassWeightOption
+): { positive: number; negative: number } {
+  if (option === 'none') {
+    return { positive: 1.0, negative: 1.0 };
+  }
+
+  const positiveCount = data.filter(d => d.label === 1).length;
+  const negativeCount = data.filter(d => d.label === 0).length;
+  const total = data.length;
+
+  if (typeof option === 'object') {
+    return option;
+  }
+
+  // 'balanced' option: inverse frequency weighting
+  // weight = n_samples / (n_classes * n_class_samples)
+  if (option === 'balanced') {
+    const positiveWeight = total / (2 * positiveCount);
+    const negativeWeight = total / (2 * negativeCount);
+    return { positive: positiveWeight, negative: negativeWeight };
+  }
+
+  return { positive: 1.0, negative: 1.0 };
+}
+
+/**
+ * Simple seeded random number generator
+ */
+function seededRandom(seed: number): () => number {
+  return function() {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+}
+
+/**
+ * Initialize weights based on strategy
+ */
+function initializeWeights(
+  featureKeys: (keyof FeatureVector)[],
+  strategy: InitStrategy,
+  random: () => number
+): Record<keyof FeatureVector, number> {
+  const weights: Record<string, number> = {};
+  const numFeatures = featureKeys.length;
+
+  for (const key of featureKeys) {
+    switch (strategy) {
+      case 'zero':
+        weights[key] = 0;
+        break;
+      case 'random':
+        // Random between -1 and 1
+        weights[key] = (random() * 2 - 1);
+        break;
+      case 'xavier':
+        // Xavier initialization: scale by sqrt(1/n)
+        weights[key] = (random() * 2 - 1) * Math.sqrt(1 / numFeatures);
+        break;
+      case 'small_random':
+        // Small random values between -0.1 and 0.1
+        weights[key] = (random() * 2 - 1) * 0.1;
+        break;
+      case 'default':
+      default:
+        // Use DEFAULT_COEFFICIENTS values
+        weights[key] = DEFAULT_COEFFICIENTS.weights[key];
+        break;
+    }
+  }
+
+  return weights as Record<keyof FeatureVector, number>;
+}
+
+/**
  * Train logistic regression model using gradient descent
- * 
+ *
  * This is a simple implementation - for production, consider using
  * a proper ML library like TensorFlow.js or ml.js
  */
 export function trainModel(
   trainingData: TrainingExample[],
-  learningRate: number = 0.01,
+  learningRateOrOptions: number | TrainingOptions = 0.01,
   iterations: number = 1000,
-  regularization: number = 0.01 // L2 regularization
+  regularization: number = 0.01
 ): ModelCoefficients {
+  // Parse options
+  let options: TrainingOptions;
+  if (typeof learningRateOrOptions === 'number') {
+    options = {
+      learningRate: learningRateOrOptions,
+      iterations,
+      regularization,
+      regularizationType: 'L2',
+      elasticRatio: 0.5,
+      initStrategy: 'default',
+      momentum: 0,
+      seed: Date.now(),
+      lrSchedule: 'constant',
+      lrDecay: 0.95,
+      lrStepSize: 100,
+      classWeight: 'none',
+    };
+  } else {
+    options = {
+      learningRate: 0.01,
+      iterations: 1000,
+      regularization: 0.01,
+      regularizationType: 'L2',
+      elasticRatio: 0.5,
+      initStrategy: 'default',
+      momentum: 0,
+      seed: Date.now(),
+      lrSchedule: 'constant',
+      lrDecay: 0.95,
+      lrStepSize: 100,
+      classWeight: 'none',
+      ...learningRateOrOptions,
+    };
+  }
+
+  const {
+    learningRate: baseLr = 0.01,
+    iterations: iters = 1000,
+    regularization: reg = 0.01,
+    regularizationType = 'L2',
+    elasticRatio = 0.5,
+    initStrategy = 'default',
+    momentum = 0,
+    seed = Date.now(),
+    lrSchedule = 'constant',
+    lrDecay = 0.95,
+    lrStepSize = 100,
+    classWeight = 'none',
+  } = options;
+
+  // Compute class weights for imbalance handling
+  const classWeights = computeClassWeights(trainingData, classWeight);
+  if (classWeight !== 'none') {
+    console.log(`  Class weights: positive=${classWeights.positive.toFixed(2)}, negative=${classWeights.negative.toFixed(2)}`);
+  }
+
+  // Learning rate scheduling function
+  const getLearningRate = (iter: number): number => {
+    switch (lrSchedule) {
+      case 'step':
+        // Reduce LR by decay factor every stepSize iterations
+        return baseLr * Math.pow(lrDecay, Math.floor(iter / lrStepSize));
+      case 'exponential':
+        // Exponential decay
+        return baseLr * Math.pow(lrDecay, iter / 100);
+      case 'cosine':
+        // Cosine annealing to near-zero
+        return baseLr * 0.5 * (1 + Math.cos(Math.PI * iter / iters));
+      case 'constant':
+      default:
+        return baseLr;
+    }
+  };
+
+  // Regularization function
+  const getRegularizationTerm = (weight: number): number => {
+    switch (regularizationType) {
+      case 'L1':
+        // L1: derivative of |w| is sign(w)
+        return reg * Math.sign(weight);
+      case 'elastic':
+        // Elastic Net: combination of L1 and L2
+        const l1Term = elasticRatio * reg * Math.sign(weight);
+        const l2Term = (1 - elasticRatio) * reg * weight;
+        return l1Term + l2Term;
+      case 'L2':
+      default:
+        // L2: derivative of w^2 is 2w, but we use w (absorbed factor of 2)
+        return reg * weight;
+    }
+  };
+
   if (trainingData.length === 0) {
     return DEFAULT_COEFFICIENTS;
   }
 
-  // Initialize weights from default
-  const coefficients: ModelCoefficients = JSON.parse(JSON.stringify(DEFAULT_COEFFICIENTS));
+  const random = seededRandom(seed);
 
-  // Calculate feature statistics for normalization
+  // Initialize coefficients structure
+  const coefficients: ModelCoefficients = JSON.parse(JSON.stringify(DEFAULT_COEFFICIENTS));
   const featureKeys = Object.keys(coefficients.weights) as (keyof FeatureVector)[];
+
+  // Initialize weights based on strategy
+  coefficients.weights = initializeWeights(featureKeys, initStrategy, random);
+
+  // Initialize intercept based on strategy
+  if (initStrategy === 'zero') {
+    coefficients.intercept = 0;
+  } else if (initStrategy === 'random' || initStrategy === 'xavier' || initStrategy === 'small_random') {
+    coefficients.intercept = (random() * 2 - 1) * 0.5;
+  }
+  // else keep default intercept
+
+  console.log(`  Init strategy: ${initStrategy}, Momentum: ${momentum}, Seed: ${seed}`);
+
+  // Track velocity for momentum
+  let interceptVelocity = 0;
+  const weightVelocities: Record<string, number> = {};
+  for (const key of featureKeys) {
+    weightVelocities[key] = 0;
+  }
   
   for (const key of featureKeys) {
     const values = trainingData.map(d => d.features[key]);
@@ -205,12 +454,15 @@ export function trainModel(
     }
   }
 
-  // Gradient descent
-  for (let iter = 0; iter < iterations; iter++) {
+  // Gradient descent with momentum and scheduled learning rate
+  for (let iter = 0; iter < iters; iter++) {
+    // Get current learning rate based on schedule
+    const lr = getLearningRate(iter);
+
     // Calculate gradients
     let interceptGradient = 0;
     const weightGradients: Record<string, number> = {};
-    
+
     for (const key of featureKeys) {
       weightGradients[key] = 0;
     }
@@ -224,21 +476,31 @@ export function trainModel(
       const prediction = sigmoid(logit);
       const error = prediction - example.label;
 
-      // Accumulate gradients
-      interceptGradient += error;
+      // Apply class weight for imbalance handling
+      const sampleWeight = example.label === 1 ? classWeights.positive : classWeights.negative;
+
+      // Accumulate weighted gradients
+      interceptGradient += error * sampleWeight;
       for (const key of featureKeys) {
-        weightGradients[key] += error * example.features[key];
+        weightGradients[key] += error * example.features[key] * sampleWeight;
       }
     }
 
-    // Update weights
+    // Update weights with momentum
     const n = normalizedData.length;
-    coefficients.intercept -= learningRate * (interceptGradient / n);
-    
+
+    // Intercept update with momentum
+    interceptVelocity = momentum * interceptVelocity + lr * (interceptGradient / n);
+    coefficients.intercept -= interceptVelocity;
+
     for (const key of featureKeys) {
-      // Add L2 regularization
-      const regularizationTerm = regularization * coefficients.weights[key];
-      coefficients.weights[key] -= learningRate * ((weightGradients[key] / n) + regularizationTerm);
+      // Add regularization (L1, L2, or Elastic Net)
+      const regTerm = getRegularizationTerm(coefficients.weights[key]);
+      const gradient = (weightGradients[key] / n) + regTerm;
+
+      // Momentum update
+      weightVelocities[key] = momentum * weightVelocities[key] + lr * gradient;
+      coefficients.weights[key] -= weightVelocities[key];
     }
 
     // Log progress periodically
@@ -443,6 +705,87 @@ function calculateCalibrationError(predictions: { prob: number; label: 0 | 1 }[]
   return totalCount > 0 ? totalError / totalCount : 0;
 }
 
+// ============================================
+// MODEL LOADING
+// ============================================
 
+// Cache for loaded coefficients
+let loadedCoefficients: ModelCoefficients | null = null;
+let coefficientsLoadAttempted = false;
 
+/**
+ * Try to load trained coefficients from file
+ * Falls back to DEFAULT_COEFFICIENTS if file doesn't exist
+ */
+export function loadTrainedCoefficients(): ModelCoefficients {
+  // Return cached if already loaded
+  if (loadedCoefficients) {
+    return loadedCoefficients;
+  }
 
+  // Only attempt to load once
+  if (coefficientsLoadAttempted) {
+    return DEFAULT_COEFFICIENTS;
+  }
+
+  coefficientsLoadAttempted = true;
+
+  // Try to load from file
+  const possiblePaths = [
+    './data/model-coefficients.json',
+    '../data/model-coefficients.json',
+    '../../data/model-coefficients.json',
+    process.cwd() + '/data/model-coefficients.json',
+  ];
+
+  for (const filePath of possiblePaths) {
+    try {
+      // Dynamic import to avoid issues in browser environments
+      const fs = require('fs');
+      const path = require('path');
+      
+      const resolvedPath = path.resolve(filePath);
+      
+      if (fs.existsSync(resolvedPath)) {
+        const content = fs.readFileSync(resolvedPath, 'utf-8');
+        loadedCoefficients = deserializeCoefficients(content);
+        
+        // Validate loaded coefficients
+        if (loadedCoefficients.trainingSamples > 0) {
+          console.log(`[Model] Loaded trained coefficients (v${loadedCoefficients.version}, ${loadedCoefficients.trainingSamples} samples)`);
+          return loadedCoefficients;
+        }
+      }
+    } catch {
+      // Continue trying other paths
+    }
+  }
+
+  // Fall back to default
+  console.log('[Model] Using default coefficients (no trained model found)');
+  return DEFAULT_COEFFICIENTS;
+}
+
+/**
+ * Get the currently active coefficients
+ * Prefers trained coefficients if available
+ */
+export function getActiveCoefficients(): ModelCoefficients {
+  return loadTrainedCoefficients();
+}
+
+/**
+ * Reset loaded coefficients (useful for testing)
+ */
+export function resetLoadedCoefficients(): void {
+  loadedCoefficients = null;
+  coefficientsLoadAttempted = false;
+}
+
+/**
+ * Check if trained coefficients are available
+ */
+export function hasTrainedModel(): boolean {
+  const coef = loadTrainedCoefficients();
+  return coef.trainingSamples > 0;
+}

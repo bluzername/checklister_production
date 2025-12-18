@@ -1,10 +1,13 @@
 /**
  * Multi-Timeframe Data Fetcher
  * Fetches 4-hour candle data from available sources
- * 
+ *
  * Strategy:
  * 1. Try Yahoo Finance 1-hour data and aggregate to 4-hour
  * 2. Fallback to estimating from daily data
+ *
+ * PIT Safety: All functions now accept asOfDate parameter for backtesting.
+ * When asOfDate is provided, data is filtered to only include candles up to that date.
  */
 
 import YahooFinance from 'yahoo-finance2';
@@ -25,13 +28,13 @@ function aggregate1HTo4H(candles1h: OHLCVCandle[]): OHLCVCandle[] {
   if (candles1h.length < 4) return [];
 
   const candles4h: OHLCVCandle[] = [];
-  
+
   // Sort by timestamp (oldest first for aggregation)
   const sorted = [...candles1h].sort((a, b) => a.timestamp - b.timestamp);
 
   for (let i = 0; i < sorted.length - 3; i += 4) {
     const group = sorted.slice(i, i + 4);
-    
+
     const candle4h: OHLCVCandle = {
       timestamp: group[0].timestamp,
       date: group[0].date,
@@ -50,15 +53,29 @@ function aggregate1HTo4H(candles1h: OHLCVCandle[]): OHLCVCandle[] {
 }
 
 /**
- * Fetch 1-hour data from Yahoo Finance and aggregate to 4-hour
+ * Filter candles to only include those up to asOfDate (PIT safety)
  */
-async function fetchYahoo1HData(ticker: string): Promise<IntradayDataResponse | null> {
+function filterCandlesByDate(candles: OHLCVCandle[], asOfDate: Date): OHLCVCandle[] {
+  const cutoffTime = asOfDate.getTime();
+  return candles.filter(c => c.timestamp <= cutoffTime);
+}
+
+/**
+ * Fetch 1-hour data from Yahoo Finance and aggregate to 4-hour
+ *
+ * @param ticker - Stock ticker symbol
+ * @param asOfDate - Optional date to filter data for PIT safety (backtesting)
+ */
+async function fetchYahoo1HData(ticker: string, asOfDate?: Date): Promise<IntradayDataResponse | null> {
   const startTime = Date.now();
-  
+
   try {
+    // Use asOfDate or current date for period2 (PIT safety)
+    const effectiveDate = asOfDate || new Date();
+
     // Fetch last 10 days of 1-hour data (240 candles = 60 4H candles)
-    const period1 = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
-    const period2 = new Date();
+    const period1 = new Date(effectiveDate.getTime() - 10 * 24 * 60 * 60 * 1000);
+    const period2 = effectiveDate;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const historical = await yahooFinance.chart(ticker, {
@@ -74,7 +91,7 @@ async function fetchYahoo1HData(ticker: string): Promise<IntradayDataResponse | 
 
     // Convert to our OHLCV format
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const candles1h: OHLCVCandle[] = historical.quotes
+    let candles1h: OHLCVCandle[] = historical.quotes
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .filter((q: any) => q.close != null && q.open != null)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,6 +104,11 @@ async function fetchYahoo1HData(ticker: string): Promise<IntradayDataResponse | 
         close: q.close,
         volume: q.volume || 0,
       }));
+
+    // PIT Safety: Filter candles to only include those up to asOfDate
+    if (asOfDate) {
+      candles1h = filterCandlesByDate(candles1h, asOfDate);
+    }
 
     // Aggregate to 4-hour candles
     const candles4h = aggregate1HTo4H(candles1h);
@@ -124,13 +146,19 @@ async function fetchYahoo1HData(ticker: string): Promise<IntradayDataResponse | 
  * Estimate 4-hour candles from daily data
  * This is a fallback when intraday data isn't available
  * Creates pseudo-4H candles by interpolating daily data
+ *
+ * @param ticker - Stock ticker symbol
+ * @param asOfDate - Optional date to filter data for PIT safety (backtesting)
  */
-async function estimateFrom4HDaily(ticker: string): Promise<IntradayDataResponse | null> {
+async function estimateFrom4HDaily(ticker: string, asOfDate?: Date): Promise<IntradayDataResponse | null> {
   const startTime = Date.now();
-  
+
   try {
-    const period1 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const period2 = new Date();
+    // Use asOfDate or current date for period2 (PIT safety)
+    const effectiveDate = asOfDate || new Date();
+
+    const period1 = new Date(effectiveDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const period2 = effectiveDate;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const historical = await yahooFinance.chart(ticker, {
@@ -147,7 +175,7 @@ async function estimateFrom4HDaily(ticker: string): Promise<IntradayDataResponse
     // Create pseudo 4H candles from daily data
     // We'll split each daily candle into 2 pseudo-4H candles
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const candles4h: OHLCVCandle[] = historical.quotes
+    let candles4h: OHLCVCandle[] = historical.quotes
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .filter((q: any) => q.close != null && q.open != null)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -156,7 +184,7 @@ async function estimateFrom4HDaily(ticker: string): Promise<IntradayDataResponse
         const midHigh = (q.open > q.close) ? q.high : (q.high + midPrice) / 2;
         const midLow = (q.open < q.close) ? q.low : (q.low + midPrice) / 2;
         const timestamp = new Date(q.date).getTime();
-        
+
         return [
           // First "4H" candle (morning session)
           {
@@ -179,8 +207,15 @@ async function estimateFrom4HDaily(ticker: string): Promise<IntradayDataResponse
             volume: Math.round((q.volume || 0) / 2),
           },
         ];
-      })
-      .reverse(); // Newest first
+      });
+
+    // PIT Safety: Filter candles to only include those up to asOfDate
+    if (asOfDate) {
+      candles4h = filterCandlesByDate(candles4h, asOfDate);
+    }
+
+    // Reverse to get newest first
+    candles4h = candles4h.reverse();
 
     const latency = Date.now() - startTime;
     logApiCall({
@@ -214,22 +249,29 @@ async function estimateFrom4HDaily(ticker: string): Promise<IntradayDataResponse
 /**
  * Main function: Get 4-hour candle data with caching
  * Tries multiple sources in order of preference
+ *
+ * @param ticker - Stock ticker symbol
+ * @param asOfDate - Optional date to filter data for PIT safety (backtesting)
+ *                   When provided, all data is filtered to only include candles up to this date.
+ *                   This prevents look-ahead bias in historical backtests.
  */
-export async function get4HourData(ticker: string): Promise<IntradayDataResponse> {
-  const key = cacheKey('mtf', '4h_data', ticker);
+export async function get4HourData(ticker: string, asOfDate?: Date): Promise<IntradayDataResponse> {
+  // Include asOfDate in cache key for PIT-safe caching
+  const dateKey = asOfDate ? asOfDate.toISOString().split('T')[0] : 'live';
+  const key = cacheKey('mtf', '4h_data', `${ticker}_${dateKey}`);
 
   const { data } = await getOrFetch(
     key,
     TTL_4H,
     async () => {
       // Try Yahoo 1H data first (most accurate)
-      const yahoo1h = await fetchYahoo1HData(ticker);
+      const yahoo1h = await fetchYahoo1HData(ticker, asOfDate);
       if (yahoo1h && yahoo1h.candles.length >= 20) {
         return yahoo1h;
       }
 
       // Fallback to estimated from daily
-      const estimated = await estimateFrom4HDaily(ticker);
+      const estimated = await estimateFrom4HDaily(ticker, asOfDate);
       if (estimated && estimated.candles.length >= 20) {
         return estimated;
       }
@@ -256,7 +298,3 @@ export function is4HDataReliable(data: IntradayDataResponse): boolean {
     (data.dataSource === 'yahoo_1h' || data.dataSource === 'estimated')
   );
 }
-
-
-
-

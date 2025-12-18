@@ -3,6 +3,10 @@
  * Fetches fundamental data: earnings surprises, revenue, financial statements
  * Uses the new /stable/ API endpoints (v3 is legacy)
  * https://site.financialmodelingprep.com/developer/docs/
+ *
+ * PIT Safety: All functions now accept asOfDate parameter for backtesting.
+ * When asOfDate is provided, earnings data is filtered to only include
+ * earnings releases that occurred before that date.
  */
 
 import { withLogging } from './logger';
@@ -63,8 +67,13 @@ interface FmpProfileData {
 /**
  * Fetch earnings data from FMP (includes EPS and revenue with estimates)
  * Endpoint: /stable/earnings?symbol={symbol}
+ *
+ * @param ticker - Stock ticker symbol
+ * @param apiKey - FMP API key
+ * @param asOfDate - Optional date for PIT safety (backtesting)
+ *                   When provided, only returns earnings released before this date.
  */
-async function fetchEarningsData(ticker: string, apiKey: string): Promise<{
+async function fetchEarningsData(ticker: string, apiKey: string, asOfDate?: Date): Promise<{
     eps_actual: number | null;
     eps_expected: number | null;
     earnings_surprise: boolean;
@@ -77,13 +86,13 @@ async function fetchEarningsData(ticker: string, apiKey: string): Promise<{
     try {
         const url = `${FMP_BASE_URL}/earnings?symbol=${ticker}&apikey=${apiKey}`;
         const response = await fetch(url);
-        
+
         if (!response.ok) {
             throw new Error(`FMP earnings error: ${response.status}`);
         }
-        
+
         const data: FmpEarningsData[] = await response.json();
-        
+
         if (!Array.isArray(data) || data.length === 0) {
             return {
                 eps_actual: null,
@@ -96,16 +105,19 @@ async function fetchEarningsData(ticker: string, apiKey: string): Promise<{
                 next_earnings_date: null,
             };
         }
-        
+
+        // PIT Safety: Use asOfDate or current date for filtering
+        const effectiveDate = asOfDate || new Date();
+
         // Find the most recent completed earnings (with epsActual not null)
-        const today = new Date();
-        const completedEarnings = data.filter(e => 
-            e.epsActual !== null && new Date(e.date) <= today
+        // that were released BEFORE the effective date (PIT safety)
+        const completedEarnings = data.filter(e =>
+            e.epsActual !== null && new Date(e.date) <= effectiveDate
         );
-        
-        // Find next upcoming earnings (epsActual is null, date is in future)
-        const upcomingEarnings = data.filter(e => 
-            e.epsActual === null && new Date(e.date) > today
+
+        // Find next upcoming earnings (epsActual is null, date is in future relative to effectiveDate)
+        const upcomingEarnings = data.filter(e =>
+            e.epsActual === null && new Date(e.date) > effectiveDate
         );
         
         const nextEarningsDate = upcomingEarnings.length > 0 
@@ -216,19 +228,23 @@ async function fetchProfile(ticker: string, apiKey: string): Promise<{
 
 /**
  * Fetch all fundamentals data from FMP
+ *
+ * @param ticker - Stock ticker symbol
+ * @param asOfDate - Optional date for PIT safety (backtesting)
  */
-async function fetchFundamentalsFromApi(ticker: string): Promise<FundamentalsData> {
+async function fetchFundamentalsFromApi(ticker: string, asOfDate?: Date): Promise<FundamentalsData> {
     const apiKey = process.env.FMP_API_KEY;
-    
+
     if (!apiKey) {
         console.warn('[FMP] API key not configured, returning empty fundamentals');
         return getEmptyFundamentals();
     }
-    
+
     try {
         // Fetch earnings and profile in parallel
+        // Note: asOfDate is passed to earnings for PIT safety
         const [earnings, profile] = await Promise.all([
-            fetchEarningsData(ticker, apiKey),
+            fetchEarningsData(ticker, apiKey, asOfDate),
             fetchProfile(ticker, apiKey),
         ]);
         
@@ -277,10 +293,16 @@ function getEmptyFundamentals(): FundamentalsData {
 
 /**
  * Main function: Get fundamentals with caching and logging
+ *
+ * @param ticker - Stock ticker symbol
+ * @param asOfDate - Optional date for PIT safety (backtesting)
+ *                   When provided, only returns earnings released before this date.
  */
-export async function getFundamentals(ticker: string): Promise<FundamentalsData> {
-    const key = cacheKey('fmp', 'fundamentals', ticker);
-    
+export async function getFundamentals(ticker: string, asOfDate?: Date): Promise<FundamentalsData> {
+    // Include asOfDate in cache key for PIT-safe caching
+    const dateKey = asOfDate ? asOfDate.toISOString().split('T')[0] : 'live';
+    const key = cacheKey('fmp', 'fundamentals', `${ticker}_${dateKey}`);
+
     try {
         const { data, cached } = await getOrFetch(
             key,
@@ -289,7 +311,7 @@ export async function getFundamentals(ticker: string): Promise<FundamentalsData>
                 'fmp',
                 'fundamentals',
                 ticker,
-                () => fetchFundamentalsFromApi(ticker)
+                () => fetchFundamentalsFromApi(ticker, asOfDate)
             )
         );
         

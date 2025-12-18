@@ -399,3 +399,6 @@ export function analyzeDivergences(prices: number[]): DivergenceAnalysis {
 
 
 
+
+
+

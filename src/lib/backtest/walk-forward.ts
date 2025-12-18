@@ -298,7 +298,7 @@ export function createStandardWalkForward(
     parameterRanges: {
       entryThreshold: [60, 65, 70, 75],
       minRRRatio: [1.5, 2.0, 2.5, 3.0],
-      maxHoldingDays: [10, 15, 20, 30],
+      maxHoldingDays: [20, 30, 45],
     },
     optimizationMetric: 'sharpe',
   };
@@ -353,7 +353,7 @@ export function createRollingWalkForward(
     parameterRanges: {
       entryThreshold: [60, 65, 70],
       minRRRatio: [2.0, 2.5],
-      maxHoldingDays: [15, 20],
+      maxHoldingDays: [30, 45],
     },
     optimizationMetric: 'sharpe',
   };
@@ -361,6 +361,9 @@ export function createRollingWalkForward(
 
 // Export
 export type { WalkForwardConfig, WalkForwardResult, WalkForwardPeriod };
+
+
+
 
 
 

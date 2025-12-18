@@ -10,6 +10,10 @@ import YahooFinance from 'yahoo-finance2';
 import { cacheKey, getOrFetch, TTL } from '../data-services/cache';
 import { logApiCall } from '../data-services/logger';
 import {
+  getCachedPrices,
+  cachePrices,
+} from '../data-services/sqlite-cache';
+import {
   MarketRegime,
   RegimeAnalysis,
   RegimeThresholds,
@@ -132,25 +136,77 @@ function calculateTrendStrength(
 // ============================================
 
 /**
- * Fetch SPY market data with caching
+ * Fetch SPY market data with SQLite caching
  * @param asOfDate - Optional: For backtesting, use data up to this date
  */
 async function fetchSPYData(asOfDate?: Date): Promise<SPYData> {
   const startTime = Date.now();
-  
+  const endDate = asOfDate || new Date();
+  // 365 calendar days = ~250 trading days (needed for SMA200)
+  const startDate = new Date(endDate.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+  const fromDateStr = startDate.toISOString().split('T')[0];
+  const toDateStr = endDate.toISOString().split('T')[0];
+
   try {
-    const endDate = asOfDate || new Date();
+    // Check SQLite cache first
+    const cached = getCachedPrices('SPY', fromDateStr, toDateStr);
+
+    if (cached && cached.length >= 50) {
+      // Cache hit - use cached data
+      // Data is returned in DESC order (newest first)
+      const asOfTime = asOfDate ? asOfDate.getTime() : Date.now();
+      const filteredCache = cached.filter(c => new Date(c.date).getTime() <= asOfTime);
+
+      if (filteredCache.length >= 50) {
+        const prices = filteredCache.map(c => c.close);
+        const highs = filteredCache.map(c => c.high);
+        const lows = filteredCache.map(c => c.low);
+
+        const price = prices[0];
+        const sma50 = calculateSMA(prices, 50);
+        const sma200 = calculateSMA(prices, 200);
+        const rsi = calculateRSI(prices, 14);
+        const atr = calculateATR(highs, lows, prices, 14);
+        const atrPercent = (atr / price) * 100;
+
+        const latency = Date.now() - startTime;
+        logApiCall({
+          service: 'cache',
+          operation: 'spy_data',
+          ticker: 'SPY',
+          latency_ms: latency,
+          success: true,
+        });
+
+        return {
+          price,
+          sma50,
+          sma200,
+          goldenCross: sma50 > sma200,
+          rsi,
+          atr,
+          atrPercent,
+          recentHighs: highs.slice(0, 20),
+          recentLows: lows.slice(0, 20),
+          recentCloses: prices.slice(0, 20),
+          timestamp: (asOfDate || new Date()).toISOString(),
+        };
+      }
+    }
+
+    // Cache miss - fetch from Yahoo Finance
     const historical = await yahooFinance.chart('SPY', {
-      period1: new Date(endDate.getTime() - 250 * 24 * 60 * 60 * 1000),
+      period1: startDate,
       period2: endDate,
       interval: '1d'
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }) as any;
-    
+
     // Filter to only include data up to asOfDate
     const asOfTime = asOfDate ? asOfDate.getTime() : Date.now();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const quotes = historical.quotes.filter((q: any) => 
+    const quotes = historical.quotes.filter((q: any) =>
       q.close != null && new Date(q.date).getTime() <= asOfTime
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -159,7 +215,29 @@ async function fetchSPYData(asOfDate?: Date): Promise<SPYData> {
     const highs = quotes.map((q: any) => q.high as number).reverse();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const lows = quotes.map((q: any) => q.low as number).reverse();
-    
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const opens = quotes.map((q: any) => q.open as number).reverse();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const volumes = quotes.map((q: any) => q.volume as number).reverse();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dates = quotes.map((q: any) => new Date(q.date).toISOString().split('T')[0]).reverse();
+
+    // Cache the data for future use
+    if (dates.length > 0) {
+      try {
+        cachePrices('SPY', {
+          dates,
+          opens,
+          highs,
+          lows,
+          closes: prices,
+          volumes,
+        }, 'yahoo');
+      } catch (cacheErr) {
+        // Ignore cache write errors
+      }
+    }
+
     const price = prices[0];
     const sma50 = calculateSMA(prices, 50);
     const sma200 = calculateSMA(prices, 200);
@@ -175,7 +253,7 @@ async function fetchSPYData(asOfDate?: Date): Promise<SPYData> {
       latency_ms: latency,
       success: true,
     });
-    
+
     return {
       price,
       sma50,
@@ -199,7 +277,7 @@ async function fetchSPYData(asOfDate?: Date): Promise<SPYData> {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    
+
     // Return safe defaults on error
     return {
       price: 0,
@@ -218,32 +296,99 @@ async function fetchSPYData(asOfDate?: Date): Promise<SPYData> {
 }
 
 /**
- * Fetch VIX data with caching
+ * Fetch VIX data with SQLite caching
  * @param asOfDate - Optional: For backtesting, use data up to this date
  */
 async function fetchVIXData(asOfDate?: Date): Promise<VIXData> {
   const startTime = Date.now();
-  
+  const endDate = asOfDate || new Date();
+  // Get 30 days of VIX data for percentile calculation
+  const startDate = new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const fromDateStr = startDate.toISOString().split('T')[0];
+  const toDateStr = endDate.toISOString().split('T')[0];
+
   try {
+    // Check SQLite cache first
+    const cached = getCachedPrices('VIX', fromDateStr, toDateStr);
+
+    if (cached && cached.length >= 5) {
+      // Cache hit - use cached data (returned in DESC order)
+      const asOfTime = asOfDate ? asOfDate.getTime() : Date.now();
+      const filteredCache = cached.filter(c => new Date(c.date).getTime() <= asOfTime);
+
+      if (filteredCache.length > 0) {
+        const level = filteredCache[0].close; // Most recent
+
+        const latency = Date.now() - startTime;
+        logApiCall({
+          service: 'cache',
+          operation: 'vix_quote',
+          ticker: 'VIX',
+          latency_ms: latency,
+          success: true,
+        });
+
+        const environment = classifyVolatility(level);
+
+        return {
+          level,
+          percentile20d: 50, // Simplified
+          environment,
+          isSafe: level < 20,
+          isElevated: level >= 20 && level < 25,
+          isExtreme: level >= 25,
+          timestamp: (asOfDate || new Date()).toISOString(),
+        };
+      }
+    }
+
+    // Cache miss - fetch from Yahoo Finance
     let level: number;
-    
+
     if (asOfDate) {
       // For backtesting, get historical VIX data
-      const startDate = new Date(asOfDate.getTime() - 5 * 24 * 60 * 60 * 1000);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const historical = await yahooFinance.chart('^VIX', {
         period1: startDate,
         period2: asOfDate,
         interval: '1d'
       }) as any;
-      
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const quotes = historical.quotes.filter((q: any) => 
+      const quotes = historical.quotes.filter((q: any) =>
         q.close != null && new Date(q.date).getTime() <= asOfDate.getTime()
       );
-      
+
       if (quotes.length > 0) {
         level = quotes[quotes.length - 1].close;
+
+        // Cache all VIX data we fetched
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const dates = quotes.map((q: any) => new Date(q.date).toISOString().split('T')[0]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const closes = quotes.map((q: any) => q.close as number);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const opens = quotes.map((q: any) => q.open as number || q.close);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const highs = quotes.map((q: any) => q.high as number || q.close);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lows = quotes.map((q: any) => q.low as number || q.close);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const volumes = quotes.map((q: any) => q.volume as number || 0);
+
+        try {
+          cachePrices('VIX', {
+            dates,
+            opens,
+            highs,
+            lows,
+            closes,
+            volumes,
+          }, 'yahoo');
+        } catch (cacheErr) {
+          // Ignore cache write errors
+        }
       } else {
         level = 20;
       }
@@ -262,9 +407,9 @@ async function fetchVIXData(asOfDate?: Date): Promise<VIXData> {
       latency_ms: latency,
       success: true,
     });
-    
+
     const environment = classifyVolatility(level);
-    
+
     return {
       level,
       percentile20d: 50, // Simplified - would need historical VIX for accurate percentile
@@ -284,7 +429,7 @@ async function fetchVIXData(asOfDate?: Date): Promise<VIXData> {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    
+
     // Return moderate defaults on error
     return {
       level: 20,

@@ -75,6 +75,31 @@ export interface FeatureVector {
   higher_highs: number; // 1 or 0
   higher_lows: number; // 1 or 0
   trend_status: number; // UPTREND=2, CONSOLIDATION=1, DOWNTREND=0
+
+  // ============================================
+  // MACRO / SENTIMENT FEATURES (Phase 5.1.4)
+  // ============================================
+
+  // Seasonality
+  day_of_week: number; // 0=Monday, 4=Friday
+  month_of_year: number; // 1-12
+  quarter: number; // 1-4
+  is_earnings_season: number; // 1 if Jan/Apr/Jul/Oct (earnings announcements), 0 otherwise
+  is_month_start: number; // 1 if first 5 trading days of month
+  is_month_end: number; // 1 if last 5 trading days of month
+  is_year_start: number; // 1 if January (January effect)
+
+  // VIX context
+  vix_percentile: number; // VIX level as percentile (0-100) relative to typical range 10-40
+  vix_regime: number; // 0=low (<15), 1=normal (15-25), 2=elevated (25-35), 3=extreme (>35)
+
+  // Market momentum context
+  spy_10d_return: number; // SPY 10-day return percentage
+  spy_20d_return: number; // SPY 20-day return percentage
+  spy_rsi: number; // SPY RSI (if available)
+
+  // Breadth indicators (derived from sector data)
+  sector_momentum: number; // Average sector RS across multiple sectors
 }
 
 // ============================================
@@ -243,10 +268,14 @@ export interface BacktestConfig {
   maxTotalRisk: number; // Maximum total portfolio risk
   maxOpenPositions: number;
   maxPerSector?: number; // Max positions per sector
+  maxPositionPercent?: number; // Max position size as % of initial capital (default: 0.15 = 15%)
+  useInitialCapitalForSizing?: boolean; // Use initial capital for position sizing, not current equity (default: true)
+  reEntryCooldownDays?: number; // Days to wait before re-entering same ticker (default: 5)
   
   // Entry criteria
   entryThreshold: number; // Min probability to enter (e.g., 60)
   minRRRatio: number; // Minimum R:R ratio
+  maxVixLevel?: number; // Maximum VIX level to allow entries (default: 22)
   requireVolumeConfirm?: boolean;
   requireMTFAlign?: boolean;
   
@@ -266,6 +295,14 @@ export interface BacktestConfig {
   // Regime adjustments
   adjustForRegime: boolean;
   regimeOverrides?: Partial<Record<MarketRegime, Partial<BacktestConfig>>>;
+  
+  // Data sources
+  useFundamentals?: boolean; // Enable FMP fundamentals data (requires API key)
+  useSentiment?: boolean; // Enable sentiment analysis (requires Anthropic API key)
+  
+  // Stop loss configuration
+  stopLossMultiplier?: number; // Multiplier for calculated stop (e.g., 0.8 for tighter)
+  maxSlippageR?: number; // Cap loss at this R multiple (e.g., 1.5)
 }
 
 /**
@@ -280,7 +317,8 @@ export interface BacktestTrade {
   entryDate: string;
   entryPrice: number;
   entryProbability: number;
-  shares: number;
+  shares: number;           // Current shares (reduces with partial exits)
+  initialShares: number;    // Original shares at entry (constant)
   positionValue: number;
   stopLoss: number;
   
@@ -548,11 +586,58 @@ export function getMarketCapBucket(marketCapBillions: number): MarketCapBucket {
 }
 
 /**
+ * Helper functions for macro/sentiment features
+ */
+function getVixPercentile(vix: number): number {
+  // Map VIX to percentile based on typical range 10-40
+  // <12 = 0%, 12-15 = 10-25%, 15-20 = 25-50%, 20-25 = 50-75%, 25-35 = 75-95%, >35 = 95-100%
+  if (vix < 10) return 0;
+  if (vix > 40) return 100;
+  return ((vix - 10) / 30) * 100;
+}
+
+function getVixRegime(vix: number): number {
+  if (vix < 15) return 0; // Low volatility
+  if (vix < 25) return 1; // Normal
+  if (vix < 35) return 2; // Elevated
+  return 3; // Extreme
+}
+
+function isEarningsSeason(month: number): boolean {
+  // Earnings seasons: Jan-Feb, Apr-May, Jul-Aug, Oct-Nov
+  return [1, 2, 4, 5, 7, 8, 10, 11].includes(month);
+}
+
+function isMonthStart(dayOfMonth: number): boolean {
+  return dayOfMonth <= 5;
+}
+
+function isMonthEnd(dayOfMonth: number, daysInMonth: number): boolean {
+  return dayOfMonth >= (daysInMonth - 4);
+}
+
+function getDaysInMonth(month: number, year: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+/**
  * Extract feature vector from AnalysisResult
  */
-export function extractFeatureVector(result: AnalysisResult): FeatureVector {
+export function extractFeatureVector(result: AnalysisResult, asOfDate?: Date): FeatureVector {
   const params = result.parameters;
-  
+
+  // Use provided date or current date for seasonality features
+  const analysisDate = asOfDate || new Date();
+  const dayOfWeek = analysisDate.getDay();
+  const month = analysisDate.getMonth() + 1; // 1-12
+  const dayOfMonth = analysisDate.getDate();
+  const year = analysisDate.getFullYear();
+  const quarter = Math.ceil(month / 3);
+  const daysInMonth = getDaysInMonth(month, year);
+
+  // VIX context
+  const vixLevel = params['1_market_condition'].vix_level ?? 20;
+
   return {
     // Criterion scores
     score_market_condition: params['1_market_condition'].score,
@@ -565,20 +650,20 @@ export function extractFeatureVector(result: AnalysisResult): FeatureVector {
     score_volume: params['8_volume'].score,
     score_ma_fibonacci: params['9_ma_fibonacci'].score,
     score_rsi: params['10_rsi'].score,
-    
+
     // Market context
     regime: result.market_regime ? encodeRegime(result.market_regime.regime) : 1,
     regime_confidence: result.market_regime?.confidence ?? 50,
-    vix_level: params['1_market_condition'].vix_level ?? 20,
+    vix_level: vixLevel,
     spy_above_50sma: params['1_market_condition'].spx_price > params['1_market_condition'].spx_sma50 ? 1 : 0,
     spy_above_200sma: params['1_market_condition'].spx_price > params['1_market_condition'].spx_sma200 ? 1 : 0,
     golden_cross: params['1_market_condition'].golden_cross ? 1 : 0,
-    
+
     // Technical indicators
     rsi_value: params['10_rsi'].value,
     atr_percent: (params['6_support_resistance'].atr / result.current_price) * 100,
-    price_vs_200sma: params['9_ma_fibonacci'].ma_200 > 0 
-      ? ((result.current_price - params['9_ma_fibonacci'].ma_200) / params['9_ma_fibonacci'].ma_200) * 100 
+    price_vs_200sma: params['9_ma_fibonacci'].ma_200 > 0
+      ? ((result.current_price - params['9_ma_fibonacci'].ma_200) / params['9_ma_fibonacci'].ma_200) * 100
       : 0,
     price_vs_50sma: params['9_ma_fibonacci'].ma_50 > 0
       ? ((result.current_price - params['9_ma_fibonacci'].ma_50) / params['9_ma_fibonacci'].ma_50) * 100
@@ -586,40 +671,67 @@ export function extractFeatureVector(result: AnalysisResult): FeatureVector {
     price_vs_20ema: params['9_ma_fibonacci'].ema_20 > 0
       ? ((result.current_price - params['9_ma_fibonacci'].ema_20) / params['9_ma_fibonacci'].ema_20) * 100
       : 0,
-    
+
     // Volume metrics
     rvol: params['4_catalyst'].rvol,
     obv_trend: result.volume_profile?.obv_trending ? 1 : (result.volume_profile?.obv_value ?? 0) < 0 ? -1 : 0,
     cmf_value: result.volume_profile?.cmf_value ?? 0,
-    
+
     // Sector
     sector_rs_20d: params['2_sector_condition'].rs_score_20d,
     sector_rs_60d: params['2_sector_condition'].rs_score_60d,
-    
+
     // Support/Resistance
     rr_ratio: params['6_support_resistance'].risk_reward_ratio,
     near_support: (params['6_support_resistance'].near_ema20 || params['6_support_resistance'].near_ema50) ? 1 : 0,
-    
+
     // Multi-timeframe
     mtf_daily_score: result.multi_timeframe?.daily_score ?? 5,
     mtf_4h_score: result.multi_timeframe?.hour4_score ?? 5,
     mtf_combined_score: result.multi_timeframe?.combined_score ?? 5,
     mtf_alignment: encodeMTFAlignment(result.multi_timeframe?.alignment ?? 'SKIP'),
-    
+
     // Divergence
     divergence_type: encodeDivergenceType(result.divergence?.type ?? 'NONE'),
     divergence_strength: result.divergence?.strength ?? 0,
-    
+
     // Pattern
     pattern_type: encodePatternType(params['5_patterns_gaps'].pattern as string),
     gap_percent: params['5_patterns_gaps'].gap_percent,
     bull_flag_detected: params['5_patterns_gaps'].bull_flag_detected ? 1 : 0,
     hammer_detected: params['7_price_movement'].hammer_detected ? 1 : 0,
-    
+
     // Trend
     higher_highs: params['7_price_movement'].recent_higher_highs ? 1 : 0,
     higher_lows: params['7_price_movement'].recent_higher_lows ? 1 : 0,
     trend_status: encodeTrendStatus(params['7_price_movement'].trend),
+
+    // ============================================
+    // MACRO / SENTIMENT FEATURES (Phase 5.1.4)
+    // ============================================
+
+    // Seasonality
+    day_of_week: Math.min(4, Math.max(0, dayOfWeek - 1)), // 0=Mon, 4=Fri (adjust for Sun=0)
+    month_of_year: month,
+    quarter: quarter,
+    is_earnings_season: isEarningsSeason(month) ? 1 : 0,
+    is_month_start: isMonthStart(dayOfMonth) ? 1 : 0,
+    is_month_end: isMonthEnd(dayOfMonth, daysInMonth) ? 1 : 0,
+    is_year_start: month === 1 ? 1 : 0,
+
+    // VIX context
+    vix_percentile: getVixPercentile(vixLevel),
+    vix_regime: getVixRegime(vixLevel),
+
+    // Market momentum context (extract from market condition data if available)
+    // These fields may not exist in older analysis results, default to 0/50
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    spy_10d_return: ((params['1_market_condition'] as unknown as Record<string, number>)?.spx_10d_return) ?? 0,
+    spy_20d_return: ((params['1_market_condition'] as unknown as Record<string, number>)?.spx_20d_return) ?? 0,
+    spy_rsi: ((params['1_market_condition'] as unknown as Record<string, number>)?.spx_rsi) ?? 50,
+
+    // Breadth indicators
+    sector_momentum: (params['2_sector_condition'].rs_score_20d + params['2_sector_condition'].rs_score_60d) / 2,
   };
 }
 

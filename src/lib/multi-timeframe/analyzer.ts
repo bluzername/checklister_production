@@ -1,6 +1,9 @@
 /**
  * Multi-Timeframe Analyzer
  * Calculates technical indicators on 4H timeframe and combines with daily analysis
+ *
+ * PIT Safety: All functions now accept asOfDate parameter for backtesting.
+ * When asOfDate is provided, analysis is performed using only data available up to that date.
  */
 
 import { get4HourData, is4HDataReliable } from './data-fetcher';
@@ -191,12 +194,17 @@ function determineTrend(
 
 /**
  * Analyze 4-hour timeframe
+ *
+ * @param ticker - Stock ticker symbol
+ * @param asOfDate - Optional date to filter data for PIT safety (backtesting)
+ *                   When provided, all data is filtered to only include candles up to this date.
  */
-async function analyze4Hour(ticker: string): Promise<Hour4Analysis> {
-  const data = await get4HourData(ticker);
+async function analyze4Hour(ticker: string, asOfDate?: Date): Promise<Hour4Analysis> {
+  const data = await get4HourData(ticker, asOfDate);
 
   if (!is4HDataReliable(data) || data.candles.length < 20) {
     // Return neutral analysis if data is unreliable
+    const effectiveDate = asOfDate || new Date();
     return {
       score: 5,
       macd: {
@@ -217,7 +225,7 @@ async function analyze4Hour(ticker: string): Promise<Hour4Analysis> {
       higherHighs: false,
       higherLows: false,
       trend: 'SIDEWAYS',
-      timestamp: new Date().toISOString(),
+      timestamp: effectiveDate.toISOString(),
     };
   }
 
@@ -284,6 +292,9 @@ async function analyze4Hour(ticker: string): Promise<Hour4Analysis> {
   // Clamp score
   score = Math.max(0, Math.min(10, score));
 
+  // Use asOfDate for timestamp if provided (PIT safety)
+  const effectiveDate = asOfDate || new Date();
+
   return {
     score: Math.round(score * 10) / 10,
     macd,
@@ -297,7 +308,7 @@ async function analyze4Hour(ticker: string): Promise<Hour4Analysis> {
     higherHighs,
     higherLows,
     trend,
-    timestamp: new Date().toISOString(),
+    timestamp: effectiveDate.toISOString(),
   };
 }
 
@@ -349,14 +360,25 @@ function getAlignmentRecommendation(alignment: TimeframeAlignment, regime?: stri
 
 /**
  * Main function: Get multi-timeframe alignment analysis
+ *
+ * @param ticker - Stock ticker symbol
+ * @param dailyScore - Score from daily timeframe analysis
+ * @param dailyTrend - Trend direction from daily analysis
+ * @param regime - Optional market regime
+ * @param asOfDate - Optional date for PIT safety (backtesting)
+ *                   When provided, all analysis uses only data available up to this date.
  */
 export async function getMultiTimeframeAlignment(
   ticker: string,
   dailyScore: number,
   dailyTrend: string,
-  regime?: string
+  regime?: string,
+  asOfDate?: Date
 ): Promise<MultiTimeframeAnalysis> {
-  const key = cacheKey('mtf', 'alignment', ticker);
+  // Include asOfDate in cache key for PIT-safe caching
+  const dateKey = asOfDate ? asOfDate.toISOString().split('T')[0] : 'live';
+  const key = cacheKey('mtf', 'alignment', `${ticker}_${dateKey}`);
+  const effectiveDate = asOfDate || new Date();
 
   // Optimization: Only fetch 4H if daily score is promising
   if (dailyScore < 5.5) {
@@ -385,19 +407,19 @@ export async function getMultiTimeframeAlignment(
         higherHighs: false,
         higherLows: false,
         trend: 'SIDEWAYS',
-        timestamp: new Date().toISOString(),
+        timestamp: effectiveDate.toISOString(),
       },
       combined_score: dailyScore,
       alignment: 'SKIP',
       recommendation: 'Daily score too low - skipping 4H analysis',
-      timestamp: new Date().toISOString(),
+      timestamp: effectiveDate.toISOString(),
     };
   }
 
   const { data: hour4 } = await getOrFetch(
     key,
     TTL.MARKET_DATA * 2, // 10 minutes cache for 4H analysis
-    () => analyze4Hour(ticker)
+    () => analyze4Hour(ticker, asOfDate)
   );
 
   // Calculate combined score (60% daily, 40% 4H)
@@ -414,7 +436,7 @@ export async function getMultiTimeframeAlignment(
     combined_score: Math.round(combinedScore * 10) / 10,
     alignment,
     recommendation,
-    timestamp: new Date().toISOString(),
+    timestamp: effectiveDate.toISOString(),
   };
 }
 
@@ -429,6 +451,9 @@ export function has4HConfirmation(mtf: MultiTimeframeAnalysis): boolean {
  * Export the analyze4Hour function for direct use
  */
 export { analyze4Hour };
+
+
+
 
 
 

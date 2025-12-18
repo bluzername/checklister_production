@@ -1,9 +1,18 @@
 /**
  * Trade Labeling
  * Functions to label historical trades for ML model training
+ *
+ * NOTE: This module provides two labeling approaches:
+ * 1. labelTrade() - Original simple forward-sim (legacy, deprecated)
+ * 2. labelTradeWithEngine() - Uses TradeManager for consistency with backtest simulator
+ *
+ * Use labelTradeWithEngine() for new code to ensure label/backtest alignment.
  */
 
 import YahooFinance from 'yahoo-finance2';
+import { TradeManager, ExitCheckResult } from '../backtest/trade-manager';
+import { BacktestConfig, BacktestTrade, ExitReason } from '../backtest/types';
+import { MarketRegime } from '../market-regime/types';
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
@@ -31,7 +40,7 @@ export interface TradeLabelResult {
  * @param entryPrice - Entry price
  * @param stopLoss - Stop loss price
  * @param targetR - R multiple to consider a "win" (default 1.5)
- * @param maxHoldingDays - Maximum days to hold (default 20)
+ * @param maxHoldingDays - Maximum days to hold (default 45)
  */
 export async function labelTrade(
   ticker: string,
@@ -39,7 +48,7 @@ export async function labelTrade(
   entryPrice: number,
   stopLoss: number,
   targetR: number = 1.5,
-  maxHoldingDays: number = 20
+  maxHoldingDays: number = 45
 ): Promise<TradeLabelResult | null> {
   try {
     const risk = entryPrice - stopLoss;
@@ -170,7 +179,7 @@ export async function batchLabelTrades(
     stopLoss: number;
   }[],
   targetR: number = 1.5,
-  maxHoldingDays: number = 20,
+  maxHoldingDays: number = 45,
   concurrency: number = 3
 ): Promise<(TradeLabelResult | null)[]> {
   const results: (TradeLabelResult | null)[] = [];
@@ -319,6 +328,421 @@ export function analyzeOptimalExit(labels: TradeLabelResult[]): {
     mfeDistribution,
   };
 }
+
+// ============================================
+// ENGINE-BASED LABELING (Recommended)
+// ============================================
+
+/**
+ * Extended label result with partial exit tracking
+ * Matches the simulator's output format for consistency
+ */
+export interface EngineLabelResult {
+  label: 0 | 1;
+  realizedR: number;              // Blended R across all exits
+  exitPrice: number;              // Final exit price (or blended avg)
+  exitDate: string;
+  exitReason: ExitReason;         // Final exit reason
+  maxFavorableExcursion: number;
+  maxAdverseExcursion: number;
+  mfeR: number;
+  maeR: number;
+  holdingDays: number;
+
+  // Partial exit tracking (matches simulator)
+  partialExits: {
+    date: string;
+    price: number;
+    shares: number;
+    reason: string;
+    pnl: number;
+  }[];
+
+  // Additional metrics
+  blendedExitPrice: number;       // Weighted average exit price
+  totalPnl: number;               // Total P&L across all exits
+}
+
+/**
+ * Default config for labeling (matches typical backtest config)
+ */
+const DEFAULT_LABEL_CONFIG: Partial<BacktestConfig> = {
+  tpRatios: [1.5, 2.5, 4.0],
+  tpSizes: [0.33, 0.33, 0.34],
+  maxHoldingDays: 45,
+  gapHandling: 'MARKET',
+  maxSlippageR: 2.0,
+  slippagePercent: 0.05,
+  commissionPerShare: 0.005,
+  useTrailingStop: false,
+};
+
+/**
+ * Label a trade using the TradeManager engine
+ *
+ * This function uses the SAME exit logic as the backtest simulator,
+ * ensuring that labeled examples match backtest results.
+ *
+ * Key differences from legacy labelTrade():
+ * - Supports partial exits (TP1: 33%, TP2: 33%, TP3: 34%)
+ * - Handles gap-through stops with maxSlippageR cap
+ * - Calculates blended R from weighted average exits
+ * - Uses configurable TP ratios and sizes
+ *
+ * @param ticker - Stock ticker symbol
+ * @param entryDate - Date of entry (YYYY-MM-DD)
+ * @param entryPrice - Entry price
+ * @param stopLoss - Stop loss price
+ * @param config - Optional config overrides for TP levels, holding days, etc.
+ * @param targetRForLabel - R multiple to consider a "win" for binary label (default 1.0)
+ */
+export async function labelTradeWithEngine(
+  ticker: string,
+  entryDate: string,
+  entryPrice: number,
+  stopLoss: number,
+  config: Partial<BacktestConfig> = {},
+  targetRForLabel: number = 1.0
+): Promise<EngineLabelResult | null> {
+  try {
+    const risk = entryPrice - stopLoss;
+    if (risk <= 0) {
+      console.warn(`Invalid risk for ${ticker}: entry ${entryPrice}, stop ${stopLoss}`);
+      return null;
+    }
+
+    // Merge default config with overrides
+    const fullConfig: BacktestConfig = {
+      name: 'Labeling',
+      startDate: entryDate,
+      endDate: entryDate, // Not used by TradeManager
+      initialCapital: 100000,
+      maxOpenPositions: 1,
+      riskPerTrade: 0.01,
+      maxTotalRisk: 0.05,
+      entryThreshold: 0,
+      minRRRatio: 0,
+      adjustForRegime: false,
+      universe: [ticker],
+      ...DEFAULT_LABEL_CONFIG,
+      ...config,
+    } as BacktestConfig;
+
+    // Calculate TP levels
+    const tp1 = entryPrice + risk * fullConfig.tpRatios[0];
+    const tp2 = entryPrice + risk * fullConfig.tpRatios[1];
+    const tp3 = entryPrice + risk * fullConfig.tpRatios[2];
+
+    // Create TradeManager
+    const tradeManager = new TradeManager(fullConfig);
+
+    // Create initial trade object
+    const initialShares = 100; // Use 100 for easy percentage math
+    const trade: BacktestTrade = {
+      tradeId: 'L1',
+      ticker,
+      signalDate: entryDate,
+      entryDate,
+      entryPrice,
+      entryProbability: 0,
+      shares: initialShares,
+      initialShares,
+      positionValue: entryPrice * initialShares,
+      stopLoss,
+      tp1,
+      tp2,
+      tp3,
+      regime: 'CHOPPY' as MarketRegime,
+      sector: 'Unknown',
+      status: 'OPEN',
+      partialExits: [],
+    };
+
+    // Fetch forward price data
+    const startDate = new Date(entryDate);
+    const endDate = new Date(startDate);
+    const maxDays = fullConfig.maxHoldingDays || 45;
+    endDate.setDate(endDate.getDate() + maxDays + 10); // Buffer for weekends
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const historical = await yahooFinance.chart(ticker, {
+      period1: startDate,
+      period2: endDate,
+      interval: '1d'
+    }) as any;
+
+    if (!historical || !historical.quotes || historical.quotes.length === 0) {
+      return null;
+    }
+
+    // Filter quotes after entry date
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const forwardQuotes = historical.quotes.filter((q: any) => {
+      const quoteDate = new Date(q.date);
+      return quoteDate > startDate && q.close != null;
+    });
+
+    if (forwardQuotes.length === 0) {
+      return null;
+    }
+
+    // Track through price history using TradeManager
+    let maxPrice = entryPrice;
+    let minPrice = entryPrice;
+    let finalExitPrice = entryPrice;
+    let finalExitDate = entryDate;
+    let finalExitReason: ExitReason = 'TIME_EXIT';
+    let holdingDays = 0;
+    let tradeExited = false;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const quote of forwardQuotes) {
+      if (tradeExited || trade.shares <= 0) break;
+
+      holdingDays++;
+      const high = quote.high as number;
+      const low = quote.low as number;
+      const close = quote.close as number;
+      const quoteDate = new Date(quote.date);
+      const quoteDateStr = quoteDate.toISOString().split('T')[0];
+
+      // Update MFE/MAE
+      maxPrice = Math.max(maxPrice, high);
+      minPrice = Math.min(minPrice, low);
+
+      // Use TradeManager to check exit
+      const exitResult = tradeManager.checkExit(trade, high, low, close, quoteDate);
+
+      // Handle partial exits
+      if (exitResult.isPartialExit && exitResult.partialShares && exitResult.partialShares > 0) {
+        const sharesToSell = Math.min(exitResult.partialShares, trade.shares);
+        const partialPnl = (exitResult.exitPrice - entryPrice) * sharesToSell;
+
+        trade.partialExits!.push({
+          date: quoteDateStr,
+          price: exitResult.exitPrice,
+          shares: sharesToSell,
+          reason: exitResult.exitReason,
+          pnl: partialPnl,
+        });
+
+        trade.shares -= sharesToSell;
+
+        // If this was the last shares, record as final exit
+        if (trade.shares <= 0) {
+          finalExitPrice = exitResult.exitPrice;
+          finalExitDate = quoteDateStr;
+          finalExitReason = exitResult.exitReason;
+          tradeExited = true;
+        }
+      }
+      // Handle full exits
+      else if (exitResult.shouldExit) {
+        // Record final exit
+        const remainingPnl = (exitResult.exitPrice - entryPrice) * trade.shares;
+
+        if (trade.shares > 0) {
+          trade.partialExits!.push({
+            date: quoteDateStr,
+            price: exitResult.exitPrice,
+            shares: trade.shares,
+            reason: exitResult.exitReason,
+            pnl: remainingPnl,
+          });
+        }
+
+        finalExitPrice = exitResult.exitPrice;
+        finalExitDate = quoteDateStr;
+        finalExitReason = exitResult.exitReason;
+        trade.shares = 0;
+        tradeExited = true;
+      }
+    }
+
+    // If trade didn't exit, force time exit at last available price
+    if (!tradeExited && trade.shares > 0) {
+      const lastQuote = forwardQuotes[forwardQuotes.length - 1];
+      const lastClose = lastQuote.close as number;
+      const lastDate = new Date(lastQuote.date).toISOString().split('T')[0];
+
+      trade.partialExits!.push({
+        date: lastDate,
+        price: lastClose,
+        shares: trade.shares,
+        reason: 'TIME_EXIT',
+        pnl: (lastClose - entryPrice) * trade.shares,
+      });
+
+      finalExitPrice = lastClose;
+      finalExitDate = lastDate;
+      finalExitReason = 'TIME_EXIT';
+    }
+
+    // Calculate blended metrics (same as simulator)
+    const partialExits = trade.partialExits || [];
+    let totalExitValue = 0;
+    let totalShares = 0;
+    let totalPnl = 0;
+
+    for (const exit of partialExits) {
+      totalExitValue += exit.price * exit.shares;
+      totalShares += exit.shares;
+      totalPnl += exit.pnl;
+    }
+
+    const blendedExitPrice = totalShares > 0 ? totalExitValue / totalShares : entryPrice;
+    const realizedR = risk > 0 ? (blendedExitPrice - entryPrice) / risk : 0;
+    const mfeR = risk > 0 ? (maxPrice - entryPrice) / risk : 0;
+    const maeR = risk > 0 ? (entryPrice - minPrice) / risk : 0;
+    const label = realizedR >= targetRForLabel ? 1 : 0;
+
+    return {
+      label,
+      realizedR,
+      exitPrice: finalExitPrice,
+      exitDate: finalExitDate,
+      exitReason: finalExitReason,
+      maxFavorableExcursion: maxPrice,
+      maxAdverseExcursion: minPrice,
+      mfeR,
+      maeR,
+      holdingDays,
+      partialExits,
+      blendedExitPrice,
+      totalPnl,
+    };
+  } catch (error) {
+    console.error(`Error labeling trade for ${ticker} with engine:`, error);
+    return null;
+  }
+}
+
+/**
+ * Batch label trades using the engine-based approach
+ */
+export async function batchLabelTradesWithEngine(
+  trades: {
+    ticker: string;
+    entryDate: string;
+    entryPrice: number;
+    stopLoss: number;
+  }[],
+  config: Partial<BacktestConfig> = {},
+  targetRForLabel: number = 1.0,
+  concurrency: number = 3
+): Promise<(EngineLabelResult | null)[]> {
+  const results: (EngineLabelResult | null)[] = [];
+
+  // Process in batches
+  for (let i = 0; i < trades.length; i += concurrency) {
+    const batch = trades.slice(i, i + concurrency);
+
+    const batchResults = await Promise.all(
+      batch.map(trade =>
+        labelTradeWithEngine(
+          trade.ticker,
+          trade.entryDate,
+          trade.entryPrice,
+          trade.stopLoss,
+          config,
+          targetRForLabel
+        )
+      )
+    );
+
+    results.push(...batchResults);
+
+    // Rate limiting
+    if (i + concurrency < trades.length) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Calculate label statistics from engine-labeled trades
+ */
+export function calculateEngineLabelStats(labels: EngineLabelResult[]): {
+  totalTrades: number;
+  winCount: number;
+  lossCount: number;
+  winRate: number;
+  avgR: number;
+  avgWinR: number;
+  avgLossR: number;
+  avgMFE: number;
+  avgMAE: number;
+  avgHoldingDays: number;
+  exitReasonDistribution: Record<string, number>;
+  partialExitStats: {
+    avgTP1Exits: number;
+    avgTP2Exits: number;
+    avgPartialExitsPerTrade: number;
+  };
+} {
+  if (labels.length === 0) {
+    return {
+      totalTrades: 0,
+      winCount: 0,
+      lossCount: 0,
+      winRate: 0,
+      avgR: 0,
+      avgWinR: 0,
+      avgLossR: 0,
+      avgMFE: 0,
+      avgMAE: 0,
+      avgHoldingDays: 0,
+      exitReasonDistribution: {},
+      partialExitStats: {
+        avgTP1Exits: 0,
+        avgTP2Exits: 0,
+        avgPartialExitsPerTrade: 0,
+      },
+    };
+  }
+
+  const winners = labels.filter(l => l.label === 1);
+  const losers = labels.filter(l => l.label === 0);
+
+  const exitReasonDistribution: Record<string, number> = {};
+  let totalTP1 = 0;
+  let totalTP2 = 0;
+  let totalPartials = 0;
+
+  for (const label of labels) {
+    exitReasonDistribution[label.exitReason] = (exitReasonDistribution[label.exitReason] || 0) + 1;
+
+    for (const partial of label.partialExits) {
+      totalPartials++;
+      if (partial.reason === 'TP1') totalTP1++;
+      if (partial.reason === 'TP2') totalTP2++;
+    }
+  }
+
+  return {
+    totalTrades: labels.length,
+    winCount: winners.length,
+    lossCount: losers.length,
+    winRate: (winners.length / labels.length) * 100,
+    avgR: labels.reduce((s, l) => s + l.realizedR, 0) / labels.length,
+    avgWinR: winners.length > 0 ? winners.reduce((s, l) => s + l.realizedR, 0) / winners.length : 0,
+    avgLossR: losers.length > 0 ? Math.abs(losers.reduce((s, l) => s + l.realizedR, 0) / losers.length) : 0,
+    avgMFE: labels.reduce((s, l) => s + l.mfeR, 0) / labels.length,
+    avgMAE: labels.reduce((s, l) => s + l.maeR, 0) / labels.length,
+    avgHoldingDays: labels.reduce((s, l) => s + l.holdingDays, 0) / labels.length,
+    exitReasonDistribution,
+    partialExitStats: {
+      avgTP1Exits: totalTP1 / labels.length,
+      avgTP2Exits: totalTP2 / labels.length,
+      avgPartialExitsPerTrade: totalPartials / labels.length,
+    },
+  };
+}
+
+
+
 
 
 

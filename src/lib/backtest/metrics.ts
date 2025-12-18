@@ -10,7 +10,8 @@ import { BacktestTrade, PerformanceMetrics, EquityPoint } from './types';
  */
 export function calculateMetrics(
   trades: BacktestTrade[],
-  initialCapital: number
+  initialCapital: number,
+  equityHistory?: EquityPoint[]
 ): PerformanceMetrics {
   const closedTrades = trades.filter(t => t.status === 'CLOSED');
   
@@ -24,9 +25,12 @@ export function calculateMetrics(
   const winRate = (winners.length / closedTrades.length) * 100;
 
   // PnL calculations
-  const totalPnl = closedTrades.reduce((sum, t) => sum + (t.realizedPnl || 0), 0);
+  const totalPnlFromTrades = closedTrades.reduce((sum, t) => sum + (t.realizedPnl || 0), 0);
+  const totalPnl = equityHistory && equityHistory.length > 0
+    ? equityHistory[equityHistory.length - 1].equity - initialCapital
+    : totalPnlFromTrades;
   const totalPnlPercent = (totalPnl / initialCapital) * 100;
-  const avgPnlPerTrade = totalPnl / closedTrades.length;
+  const avgPnlPerTrade = closedTrades.length > 0 ? totalPnl / closedTrades.length : 0;
 
   const avgWin = winners.length > 0
     ? winners.reduce((sum, t) => sum + (t.realizedPnl || 0), 0) / winners.length
@@ -55,15 +59,15 @@ export function calculateMetrics(
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
 
   // Drawdown calculations
-  const { maxDrawdown, maxDrawdownPercent, maxDrawdownDuration } = calculateDrawdown(closedTrades, initialCapital);
+  const { maxDrawdown, maxDrawdownPercent, maxDrawdownDuration } = calculateDrawdown(closedTrades, initialCapital, equityHistory);
 
   // Risk-adjusted returns
-  const dailyReturns = calculateDailyReturns(closedTrades, initialCapital);
+  const dailyReturns = calculateDailyReturns(closedTrades, initialCapital, equityHistory);
   const sharpeRatio = calculateSharpeRatio(dailyReturns);
   const sortinoRatio = calculateSortinoRatio(dailyReturns);
   
   // Calmar ratio: Annualized return / Max drawdown
-  const annualizedReturn = calculateAnnualizedReturn(totalPnlPercent, closedTrades);
+  const annualizedReturn = calculateAnnualizedReturn(totalPnlPercent, closedTrades, equityHistory);
   const calmarRatio = maxDrawdownPercent > 0 ? annualizedReturn / maxDrawdownPercent : 0;
 
   // Holding time
@@ -133,8 +137,42 @@ function getEmptyMetrics(): PerformanceMetrics {
  */
 function calculateDrawdown(
   trades: BacktestTrade[],
-  initialCapital: number
+  initialCapital: number,
+  equityHistory?: EquityPoint[]
 ): { maxDrawdown: number; maxDrawdownPercent: number; maxDrawdownDuration: number } {
+  if (equityHistory && equityHistory.length > 1) {
+    const sorted = [...equityHistory].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    let peakEquity = initialCapital;
+    let maxDrawdown = 0;
+    let maxDrawdownPercent = 0;
+    let maxDrawdownDuration = 0;
+    let drawdownStart: Date | null = null;
+
+    for (const point of sorted) {
+      const equity = point.equity;
+      if (equity > peakEquity) {
+        peakEquity = equity;
+        if (drawdownStart) {
+          const duration = Math.ceil((new Date(point.date).getTime() - drawdownStart.getTime()) / (1000 * 60 * 60 * 24));
+          maxDrawdownDuration = Math.max(maxDrawdownDuration, duration);
+          drawdownStart = null;
+        }
+      } else {
+        if (!drawdownStart) {
+          drawdownStart = new Date(point.date);
+        }
+        const currentDrawdown = peakEquity - equity;
+        const currentDrawdownPct = (currentDrawdown / peakEquity) * 100;
+        if (currentDrawdown > maxDrawdown) {
+          maxDrawdown = currentDrawdown;
+          maxDrawdownPercent = currentDrawdownPct;
+        }
+      }
+    }
+
+    return { maxDrawdown, maxDrawdownPercent, maxDrawdownDuration };
+  }
+
   if (trades.length === 0) {
     return { maxDrawdown: 0, maxDrawdownPercent: 0, maxDrawdownDuration: 0 };
   }
@@ -184,9 +222,25 @@ function calculateDrawdown(
 }
 
 /**
- * Calculate daily returns from trades
+ * Calculate daily returns from trades or mark-to-market equity
  */
-function calculateDailyReturns(trades: BacktestTrade[], initialCapital: number): number[] {
+function calculateDailyReturns(
+  trades: BacktestTrade[],
+  initialCapital: number,
+  equityHistory?: EquityPoint[]
+): number[] {
+  if (equityHistory && equityHistory.length > 1) {
+    const sorted = [...equityHistory].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const returns: number[] = [];
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1].equity;
+      const curr = sorted[i].equity;
+      if (prev === 0) continue;
+      returns.push(((curr - prev) / prev) * 100);
+    }
+    return returns;
+  }
+
   if (trades.length === 0) return [];
 
   // Group trades by exit date
@@ -263,18 +317,28 @@ function calculateSortinoRatio(dailyReturns: number[]): number {
 /**
  * Calculate annualized return
  */
-function calculateAnnualizedReturn(totalReturnPct: number, trades: BacktestTrade[]): number {
-  if (trades.length === 0) return 0;
+function calculateAnnualizedReturn(
+  totalReturnPct: number,
+  trades: BacktestTrade[],
+  equityHistory?: EquityPoint[]
+): number {
+  const dateRange: number[] = [];
 
-  // Get date range
-  const dates = trades
-    .filter(t => t.entryDate && t.exitDate)
-    .flatMap(t => [new Date(t.entryDate), new Date(t.exitDate!)]);
+  if (equityHistory && equityHistory.length > 1) {
+    const sorted = [...equityHistory].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    dateRange.push(new Date(sorted[0].date).getTime());
+    dateRange.push(new Date(sorted[sorted.length - 1].date).getTime());
+  } else {
+    const dates = trades
+      .filter(t => t.entryDate && t.exitDate)
+      .flatMap(t => [new Date(t.entryDate), new Date(t.exitDate!)]);
+    dates.forEach(d => dateRange.push(d.getTime()));
+  }
 
-  if (dates.length < 2) return totalReturnPct;
+  if (dateRange.length < 2) return totalReturnPct;
 
-  const minDate = Math.min(...dates.map(d => d.getTime()));
-  const maxDate = Math.max(...dates.map(d => d.getTime()));
+  const minDate = Math.min(...dateRange);
+  const maxDate = Math.max(...dateRange);
   const tradingDays = (maxDate - minDate) / (1000 * 60 * 60 * 24);
   const years = tradingDays / 365;
 
@@ -484,7 +548,6 @@ export function calculateStreaks(trades: BacktestTrade[]): {
     currentStreakType: lastWasWin === null ? 'NONE' : lastWasWin ? 'WIN' : 'LOSS',
   };
 }
-
 
 
 

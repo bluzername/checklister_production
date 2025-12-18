@@ -47,9 +47,9 @@ export class TradeManager {
       }
     }
 
-    // Check take profit levels
+    // Check take profit levels (includes both full exits and partial exits)
     const tpResult = this.checkTakeProfitLevels(trade, high, close);
-    if (tpResult.shouldExit) {
+    if (tpResult.shouldExit || tpResult.isPartialExit) {
       return tpResult;
     }
 
@@ -71,22 +71,55 @@ export class TradeManager {
 
   /**
    * Handle stop loss hit
+   * Includes gap-through protection and maximum slippage cap
    */
   private handleStopLoss(trade: BacktestTrade, low: number): ExitCheckResult {
+    // Calculate risk (R)
+    const risk = trade.entryPrice - trade.stopLoss;
+    if (risk <= 0) {
+      return { shouldExit: true, exitPrice: trade.stopLoss, exitReason: 'STOP_LOSS' };
+    }
+
     // Check for gap through stop (worst case - gap open below stop)
     let exitPrice = trade.stopLoss;
+    const gappedThrough = low < trade.stopLoss;
+    
+    if (gappedThrough) {
+      if (this.config.gapHandling === 'MARKET') {
+        // Exit at low (worst case), but apply maxSlippageR cap if configured
+        exitPrice = low;
+        
+        // Apply maximum slippage cap
+        const maxSlippageR = this.config.maxSlippageR ?? 2.0; // Default cap at -2R
+        const minExitPrice = trade.entryPrice - (risk * maxSlippageR);
+        exitPrice = Math.max(exitPrice, minExitPrice);
+        
+      } else if (this.config.gapHandling === 'SKIP') {
+        // Skip execution if gapped too significantly (> 3% through stop)
+        const gapPercent = ((trade.stopLoss - low) / trade.stopLoss) * 100;
+        if (gapPercent > 3) {
+          return {
+            shouldExit: false,
+            exitPrice: 0,
+            exitReason: 'STOP_LOSS',
+          };
+        }
+        exitPrice = low;
+        
+      } else if (this.config.gapHandling === 'LIMIT') {
+        // Use stop price exactly (assume limit order at stop was filled)
+        exitPrice = trade.stopLoss;
+      }
+    }
 
-    if (this.config.gapHandling === 'MARKET') {
-      // If price gapped through stop, exit at low (slippage applied later)
-      exitPrice = Math.min(trade.stopLoss, low);
-    } else if (this.config.gapHandling === 'SKIP') {
-      // Skip execution if gapped significantly
-      if (low < trade.stopLoss * 0.97) { // Gap > 3%
-        return {
-          shouldExit: false,
-          exitPrice: 0,
-          exitReason: 'STOP_LOSS',
-        };
+    // Apply stop loss multiplier if configured (for tighter stops)
+    if (this.config.stopLossMultiplier && this.config.stopLossMultiplier < 1) {
+      // Adjust exit price to simulate tighter stop
+      // This is mainly for analysis - in reality, stop would have been placed tighter
+      const adjustedRisk = risk * this.config.stopLossMultiplier;
+      const tighterStop = trade.entryPrice - adjustedRisk;
+      if (low <= tighterStop) {
+        exitPrice = Math.max(tighterStop, exitPrice);
       }
     }
 
@@ -119,9 +152,15 @@ export class TradeManager {
       };
     }
 
+    // Use initialShares for correct tranche sizing (33/33/34 of original position)
+    const initialShares = trade.initialShares || trade.shares;
+
     // Check TP2
     if (!hasTP2 && high >= trade.tp2) {
-      const sharesToSell = Math.floor(trade.shares * this.config.tpSizes[1]);
+      const sharesToSell = Math.min(
+        Math.floor(initialShares * this.config.tpSizes[1]),
+        trade.shares // Don't sell more than remaining
+      );
       if (sharesToSell > 0) {
         return {
           shouldExit: false,
@@ -135,7 +174,10 @@ export class TradeManager {
 
     // Check TP1
     if (!hasTP1 && high >= trade.tp1) {
-      const sharesToSell = Math.floor(trade.shares * this.config.tpSizes[0]);
+      const sharesToSell = Math.min(
+        Math.floor(initialShares * this.config.tpSizes[0]),
+        trade.shares // Don't sell more than remaining
+      );
       if (sharesToSell > 0) {
         return {
           shouldExit: false,

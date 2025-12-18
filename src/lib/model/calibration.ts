@@ -324,18 +324,18 @@ export function findOptimalTemperature(
   // Grid search over temperature values
   for (let temp = 0.1; temp <= 5.0; temp += 0.1) {
     let nll = 0;
-    
+
     for (const pred of predictions) {
       const calibrated = temperatureScale(pred.probability, temp) / 100;
       const clampedProb = Math.max(1e-10, Math.min(1 - 1e-10, calibrated));
-      
+
       if (pred.label === 1) {
         nll -= Math.log(clampedProb);
       } else {
         nll -= Math.log(1 - clampedProb);
       }
     }
-    
+
     if (nll < bestNLL) {
       bestNLL = nll;
       bestTemp = temp;
@@ -344,6 +344,320 @@ export function findOptimalTemperature(
 
   return bestTemp;
 }
+
+// ============================================
+// UNIFIED CALIBRATION PARAMETERS
+// ============================================
+
+export type CalibrationMethod = 'none' | 'platt' | 'isotonic' | 'temperature' | 'ensemble';
+
+/**
+ * Unified calibration parameters that can be serialized with a model
+ */
+export interface CalibrationParams {
+  method: CalibrationMethod;
+  platt?: PlattParameters;
+  isotonic?: IsotonicModel;
+  temperature?: number;
+  ensemble?: EnsembleCalibrator;
+  fittedAt?: string;
+  metrics?: {
+    expectedCalibrationError: number;
+    maxCalibrationError: number;
+    brierScore: number;
+  };
+}
+
+/**
+ * Calibration comparison result
+ */
+export interface CalibrationComparison {
+  method: CalibrationMethod;
+  ece: number;
+  mce: number;
+  brierScore: number;
+  params: CalibrationParams;
+}
+
+// ============================================
+// AUTO-SELECT BEST CALIBRATION
+// ============================================
+
+/**
+ * Automatically select the best calibration method
+ * Fits all methods on training data and evaluates on validation data
+ */
+export function autoSelectCalibration(
+  trainPredictions: { probability: number; label: 0 | 1 }[],
+  valPredictions: { probability: number; label: 0 | 1 }[],
+  verbose: boolean = false
+): CalibrationParams {
+  const comparisons: CalibrationComparison[] = [];
+
+  // 1. No calibration (baseline)
+  const noneEval = evaluateCalibration(valPredictions);
+  comparisons.push({
+    method: 'none',
+    ece: noneEval.expectedCalibrationError,
+    mce: noneEval.maxCalibrationError,
+    brierScore: noneEval.brierScore,
+    params: { method: 'none' },
+  });
+
+  // 2. Platt scaling
+  const plattParams = fitPlattScaling(trainPredictions);
+  const plattCalibrated = valPredictions.map(p => ({
+    probability: plattCalibrate(p.probability, plattParams),
+    label: p.label,
+  }));
+  const plattEval = evaluateCalibration(plattCalibrated);
+  comparisons.push({
+    method: 'platt',
+    ece: plattEval.expectedCalibrationError,
+    mce: plattEval.maxCalibrationError,
+    brierScore: plattEval.brierScore,
+    params: { method: 'platt', platt: plattParams },
+  });
+
+  // 3. Isotonic regression
+  const isotonicModel = fitIsotonicRegression(trainPredictions);
+  const isotonicCalibrated = valPredictions.map(p => ({
+    probability: isotonicCalibrate(p.probability, isotonicModel),
+    label: p.label,
+  }));
+  const isotonicEval = evaluateCalibration(isotonicCalibrated);
+  comparisons.push({
+    method: 'isotonic',
+    ece: isotonicEval.expectedCalibrationError,
+    mce: isotonicEval.maxCalibrationError,
+    brierScore: isotonicEval.brierScore,
+    params: { method: 'isotonic', isotonic: isotonicModel },
+  });
+
+  // 4. Temperature scaling
+  const temperature = findOptimalTemperature(trainPredictions);
+  const tempCalibrated = valPredictions.map(p => ({
+    probability: temperatureScale(p.probability, temperature),
+    label: p.label,
+  }));
+  const tempEval = evaluateCalibration(tempCalibrated);
+  comparisons.push({
+    method: 'temperature',
+    ece: tempEval.expectedCalibrationError,
+    mce: tempEval.maxCalibrationError,
+    brierScore: tempEval.brierScore,
+    params: { method: 'temperature', temperature },
+  });
+
+  // 5. Optimized ensemble
+  const ensembleParams = fitOptimizedEnsembleCalibrator(trainPredictions, valPredictions);
+  const ensembleCalibrated = valPredictions.map(p => ({
+    probability: ensembleCalibrate(p.probability, ensembleParams),
+    label: p.label,
+  }));
+  const ensembleEval = evaluateCalibration(ensembleCalibrated);
+  comparisons.push({
+    method: 'ensemble',
+    ece: ensembleEval.expectedCalibrationError,
+    mce: ensembleEval.maxCalibrationError,
+    brierScore: ensembleEval.brierScore,
+    params: { method: 'ensemble', ensemble: ensembleParams },
+  });
+
+  // Find best by ECE (primary) and Brier score (secondary)
+  comparisons.sort((a, b) => {
+    if (Math.abs(a.ece - b.ece) > 0.5) {
+      return a.ece - b.ece;
+    }
+    return a.brierScore - b.brierScore;
+  });
+
+  if (verbose) {
+    console.log('\nCalibration Method Comparison:');
+    console.log('  Method        ECE      MCE    Brier');
+    console.log('  ' + '-'.repeat(40));
+    for (const c of comparisons) {
+      console.log(
+        `  ${c.method.padEnd(12)} ${c.ece.toFixed(2).padStart(6)}% ${c.mce.toFixed(2).padStart(6)}% ${c.brierScore.toFixed(4).padStart(8)}`
+      );
+    }
+    console.log(`\nBest method: ${comparisons[0].method}`);
+  }
+
+  const best = comparisons[0];
+  return {
+    ...best.params,
+    fittedAt: new Date().toISOString(),
+    metrics: {
+      expectedCalibrationError: best.ece,
+      maxCalibrationError: best.mce,
+      brierScore: best.brierScore,
+    },
+  };
+}
+
+// ============================================
+// OPTIMIZED ENSEMBLE CALIBRATOR
+// ============================================
+
+/**
+ * Fit ensemble calibrator with optimized weights
+ * Uses grid search to find best Platt/Isotonic/Temperature mix
+ */
+export function fitOptimizedEnsembleCalibrator(
+  trainPredictions: { probability: number; label: 0 | 1 }[],
+  valPredictions: { probability: number; label: 0 | 1 }[]
+): EnsembleCalibrator {
+  // Fit individual methods
+  const platt = fitPlattScaling(trainPredictions);
+  const isotonic = fitIsotonicRegression(trainPredictions);
+
+  // Grid search for optimal weights
+  let bestWeights = { platt: 0.5, isotonic: 0.5 };
+  let bestECE = Infinity;
+
+  for (let plattWeight = 0; plattWeight <= 1.0; plattWeight += 0.1) {
+    const isotonicWeight = 1 - plattWeight;
+
+    const calibrated = valPredictions.map(p => {
+      const plattProb = plattCalibrate(p.probability, platt);
+      const isotonicProb = isotonicCalibrate(p.probability, isotonic);
+      return {
+        probability: plattProb * plattWeight + isotonicProb * isotonicWeight,
+        label: p.label,
+      };
+    });
+
+    const evaluation = evaluateCalibration(calibrated);
+    if (evaluation.expectedCalibrationError < bestECE) {
+      bestECE = evaluation.expectedCalibrationError;
+      bestWeights = { platt: plattWeight, isotonic: isotonicWeight };
+    }
+  }
+
+  return {
+    platt,
+    isotonic,
+    weights: bestWeights,
+  };
+}
+
+// ============================================
+// UNIFIED CALIBRATION APPLY
+// ============================================
+
+/**
+ * Apply calibration using stored parameters
+ */
+export function applyCalibration(
+  probability: number,
+  params: CalibrationParams
+): number {
+  switch (params.method) {
+    case 'platt':
+      if (!params.platt) return probability;
+      return plattCalibrate(probability, params.platt);
+
+    case 'isotonic':
+      if (!params.isotonic) return probability;
+      return isotonicCalibrate(probability, params.isotonic);
+
+    case 'temperature':
+      if (params.temperature === undefined) return probability;
+      return temperatureScale(probability, params.temperature);
+
+    case 'ensemble':
+      if (!params.ensemble) return probability;
+      return ensembleCalibrate(probability, params.ensemble);
+
+    case 'none':
+    default:
+      return probability;
+  }
+}
+
+// ============================================
+// SERIALIZATION
+// ============================================
+
+/**
+ * Serialize calibration parameters for storage
+ */
+export function serializeCalibrationParams(params: CalibrationParams): string {
+  return JSON.stringify(params, null, 2);
+}
+
+/**
+ * Deserialize calibration parameters
+ */
+export function deserializeCalibrationParams(json: string): CalibrationParams {
+  return JSON.parse(json) as CalibrationParams;
+}
+
+// ============================================
+// FORMATTING
+// ============================================
+
+/**
+ * Format calibration report
+ */
+export function formatCalibrationReport(params: CalibrationParams): string {
+  const lines: string[] = [];
+
+  lines.push('');
+  lines.push('╔══════════════════════════════════════════════════════════════════╗');
+  lines.push('║                    CALIBRATION REPORT                            ║');
+  lines.push('╚══════════════════════════════════════════════════════════════════╝');
+
+  lines.push(`\nMethod: ${params.method.toUpperCase()}`);
+
+  if (params.fittedAt) {
+    lines.push(`Fitted: ${params.fittedAt}`);
+  }
+
+  if (params.metrics) {
+    lines.push('\n┌────────────────────────────────────────────────────────────────┐');
+    lines.push('│                      METRICS                                   │');
+    lines.push('├────────────────────────────────────────────────────────────────┤');
+    lines.push(`│  Expected Cal. Error: ${params.metrics.expectedCalibrationError.toFixed(2)}%                                  │`);
+    lines.push(`│  Max Cal. Error:      ${params.metrics.maxCalibrationError.toFixed(2)}%                                  │`);
+    lines.push(`│  Brier Score:         ${params.metrics.brierScore.toFixed(4)}                                   │`);
+    lines.push('└────────────────────────────────────────────────────────────────┘');
+  }
+
+  switch (params.method) {
+    case 'platt':
+      if (params.platt) {
+        lines.push(`\nPlatt Parameters: a=${params.platt.a.toFixed(4)}, b=${params.platt.b.toFixed(4)}`);
+      }
+      break;
+
+    case 'temperature':
+      if (params.temperature !== undefined) {
+        lines.push(`\nTemperature: ${params.temperature.toFixed(2)}`);
+      }
+      break;
+
+    case 'ensemble':
+      if (params.ensemble) {
+        lines.push(`\nEnsemble Weights:`);
+        lines.push(`  Platt:    ${(params.ensemble.weights.platt * 100).toFixed(0)}%`);
+        lines.push(`  Isotonic: ${(params.ensemble.weights.isotonic * 100).toFixed(0)}%`);
+      }
+      break;
+
+    case 'isotonic':
+      if (params.isotonic) {
+        lines.push(`\nIsotonic Model: ${params.isotonic.x.length} breakpoints`);
+      }
+      break;
+  }
+
+  return lines.join('\n');
+}
+
+
+
 
 
 

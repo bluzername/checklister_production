@@ -78,3 +78,6 @@ export interface IntradayDataResponse {
 
 
 
+
+
+

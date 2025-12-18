@@ -70,20 +70,112 @@ export const SP500_FILTER: UniverseFilter = {
 // ============================================
 
 /**
- * S&P 500 components (subset for testing)
- * In production, this would be fetched from an API or database
+ * Extended US Stock Universe (300+ tickers)
+ * Includes S&P 500 components + Russell 1000 mid-caps
+ * Filtered for liquidity: Avg daily volume > $10M, Market cap > $1B, Price > $10
  */
 export const SP500_TICKERS = [
+  // ============================================
+  // MEGA CAP (Top 50 by market cap)
+  // ============================================
   'AAPL', 'MSFT', 'AMZN', 'NVDA', 'GOOGL', 'META', 'TSLA', 'BRK.B', 'UNH', 'JNJ',
   'XOM', 'V', 'JPM', 'PG', 'MA', 'HD', 'CVX', 'MRK', 'ABBV', 'LLY',
   'PEP', 'KO', 'COST', 'AVGO', 'MCD', 'WMT', 'TMO', 'CSCO', 'ACN', 'ABT',
   'CRM', 'DHR', 'NEE', 'LIN', 'NKE', 'AMD', 'TXN', 'PM', 'UNP', 'UPS',
   'ORCL', 'INTC', 'RTX', 'HON', 'LOW', 'QCOM', 'IBM', 'CAT', 'SBUX', 'GE',
+
+  // ============================================
+  // LARGE CAP (Next 100)
+  // ============================================
   'INTU', 'AMAT', 'BA', 'AMGN', 'PLD', 'SPGI', 'DE', 'MS', 'BLK', 'GS',
   'AXP', 'GILD', 'MDLZ', 'ISRG', 'ADI', 'SYK', 'VRTX', 'MMC', 'TJX', 'ADP',
   'CVS', 'REGN', 'BKNG', 'C', 'SCHW', 'LRCX', 'MO', 'PGR', 'CB', 'ETN',
   'CI', 'ZTS', 'EOG', 'SO', 'BSX', 'FISV', 'AMT', 'BDX', 'DUK', 'SLB',
   'CME', 'CL', 'ITW', 'EQIX', 'NOC', 'MU', 'AON', 'WM', 'SHW', 'ICE',
+  'NSC', 'PNC', 'FDX', 'MCK', 'EMR', 'USB', 'KLAC', 'GD', 'WFC', 'SNPS',
+  'CDNS', 'APD', 'CMG', 'MAR', 'ORLY', 'MCO', 'ECL', 'ADSK', 'MSI', 'TT',
+  'PSA', 'AJG', 'TGT', 'CTAS', 'HLT', 'PCAR', 'ABNB', 'CARR', 'TDG', 'NXPI',
+  'ROP', 'AZO', 'AFL', 'SRE', 'CCI', 'AEP', 'DHI', 'TFC', 'PSX', 'HES',
+  'OXY', 'MET', 'F', 'GM', 'PANW', 'DXCM', 'WELL', 'GIS', 'PAYX', 'MSCI',
+
+  // ============================================
+  // MID-LARGE CAP TECHNOLOGY
+  // ============================================
+  'NOW', 'SNOW', 'CRWD', 'ZS', 'DDOG', 'NET', 'TEAM', 'FTNT', 'WDAY', 'ANSS',
+  'MRVL', 'ON', 'MPWR', 'KEYS', 'TER', 'ENTG', 'SWKS', 'FSLR', 'ENPH', 'SEDG',
+  'SMCI', 'ANET', 'FICO', 'CPRT', 'ZBRA', 'AKAM', 'FFIV', 'JNPR', 'NTAP', 'SSNC',
+  'GEN', 'EPAM', 'PAYC', 'PCTY', 'MANH', 'HUBS', 'DOCU', 'OKTA', 'SPLK', 'TWLO',
+
+  // ============================================
+  // MID-LARGE CAP HEALTHCARE & BIOTECH
+  // ============================================
+  'HCA', 'IDXX', 'IQV', 'EW', 'A', 'MTD', 'RMD', 'HOLX', 'ILMN', 'ALGN',
+  'TECH', 'WAT', 'BIO', 'PKI', 'TFX', 'PODD', 'RGEN', 'MRNA', 'BMRN', 'SGEN',
+  'BIIB', 'ALNY', 'INCY', 'EXAS', 'SRPT', 'RARE', 'NBIX', 'PCVX', 'HZNP', 'CAH',
+  'COR', 'HSIC', 'PDCO', 'OMI', 'XRAY', 'NVS', 'AZN', 'VEEV', 'ZBH', 'COO',
+
+  // ============================================
+  // MID-LARGE CAP FINANCIALS
+  // ============================================
+  'TRV', 'ALL', 'MKL', 'HIG', 'L', 'CINF', 'RE', 'WRB', 'AIZ', 'AFG',
+  'FITB', 'KEY', 'CFG', 'RF', 'HBAN', 'MTB', 'STT', 'NTRS', 'BK', 'ZION',
+  'FRC', 'SIVB', 'WAL', 'EWBC', 'FHN', 'SBNY', 'GBCI', 'UMBF', 'PNFP', 'WTFC',
+  'IVZ', 'TROW', 'BEN', 'AMG', 'SEIC', 'JHG', 'APAM', 'AB', 'EV', 'VCTR',
+
+  // ============================================
+  // MID-LARGE CAP INDUSTRIALS
+  // ============================================
+  'GWW', 'FAST', 'PWR', 'J', 'RSG', 'EFX', 'ROK', 'DOV', 'AME', 'ODFL',
+  'IR', 'PH', 'ROL', 'NDSN', 'SWK', 'TRMB', 'XYL', 'GPC', 'EXPD', 'CHRW',
+  'JBHT', 'LSTR', 'HUBG', 'SAIA', 'WERN', 'ARCB', 'KNX', 'R', 'SNDR', 'RXO',
+  'URI', 'WAB', 'TTC', 'GNRC', 'AGCO', 'MIDD', 'LII', 'WTS', 'AOS', 'SSD',
+
+  // ============================================
+  // MID-LARGE CAP CONSUMER DISCRETIONARY
+  // ============================================
+  'LVS', 'WYNN', 'MGM', 'CZR', 'RCL', 'CCL', 'NCLH', 'H', 'IHG', 'CHH',
+  'DRI', 'YUM', 'QSR', 'WING', 'SHAK', 'TXRH', 'CAKE', 'BLMN', 'EAT', 'PLAY',
+  'ULTA', 'LULU', 'RH', 'WSM', 'ETSY', 'W', 'BURL', 'ROST', 'DG', 'DLTR',
+  'FIVE', 'OLLI', 'BBY', 'KSS', 'JWN', 'M', 'GPS', 'ANF', 'AEO', 'URBN',
+
+  // ============================================
+  // MID-LARGE CAP CONSUMER STAPLES
+  // ============================================
+  'SYY', 'KR', 'WBA', 'STZ', 'TAP', 'BF.B', 'SAM', 'MNST', 'FIZZ', 'CELH',
+  'HSY', 'K', 'SJM', 'HRL', 'MKC', 'CHD', 'CLX', 'KMB', 'EL', 'COTY',
+  'TPR', 'CPRI', 'PVH', 'VFC', 'HBI', 'UAA', 'DECK', 'CROX', 'SKX', 'GOOS',
+
+  // ============================================
+  // MID-LARGE CAP ENERGY
+  // ============================================
+  'COP', 'PXD', 'DVN', 'FANG', 'MRO', 'APA', 'MUR', 'CLR', 'PR', 'SM',
+  'VLO', 'MPC', 'PBF', 'DK', 'DINO', 'PARR', 'CVE', 'OVV', 'MTDR', 'CHRD',
+  'HAL', 'BKR', 'NOV', 'FTI', 'CHX', 'RES', 'PTEN', 'HP', 'LBRT', 'WHD',
+
+  // ============================================
+  // MID-LARGE CAP MATERIALS
+  // ============================================
+  'PPG', 'ALB', 'DD', 'DOW', 'LYB', 'CE', 'EMN', 'WLK', 'HUN', 'OLN',
+  'TROX', 'CC', 'FMC', 'CF', 'MOS', 'NTR', 'NUE', 'STLD', 'RS', 'CMC',
+  'X', 'CLF', 'AA', 'FCX', 'SCCO', 'TECK', 'ATI', 'CRS', 'HAYN', 'ZEUS',
+
+  // ============================================
+  // MID-LARGE CAP UTILITIES
+  // ============================================
+  'D', 'XEL', 'ED', 'EXC', 'WEC', 'ES', 'AWK', 'ATO', 'NI', 'CNP',
+  'CMS', 'DTE', 'EVRG', 'OGE', 'PNW', 'FE', 'PPL', 'ETR', 'AES', 'LNT',
+
+  // ============================================
+  // MID-LARGE CAP REAL ESTATE
+  // ============================================
+  'DLR', 'SPG', 'O', 'AVB', 'EQR', 'VTR', 'ARE', 'SBAC', 'WY', 'ESS',
+  'MAA', 'UDR', 'CPT', 'KIM', 'REG', 'BXP', 'HST', 'PEAK', 'DOC', 'IRM',
+
+  // ============================================
+  // MID-LARGE CAP COMMUNICATION SERVICES
+  // ============================================
+  'NFLX', 'DIS', 'CMCSA', 'VZ', 'T', 'TMUS', 'CHTR', 'EA', 'TTWO', 'ATVI',
+  'RBLX', 'ZG', 'MTCH', 'IAC', 'ANGI', 'PINS', 'SNAP', 'SPOT', 'LYV', 'SIRI',
 ];
 
 /**
@@ -419,6 +511,9 @@ export function getQuickUniverse(size: 'small' | 'medium' | 'large' = 'medium'):
       return SP500_TICKERS.slice(0, 50);
   }
 }
+
+
+
 
 
 
