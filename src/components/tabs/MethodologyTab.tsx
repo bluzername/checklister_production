@@ -5,1220 +5,726 @@ import {
     ChevronDown,
     ChevronRight,
     TrendingUp,
-    Building2,
-    Briefcase,
-    Zap,
-    BarChart3,
+    Database,
+    Cpu,
+    BarChart2,
     Target,
     Activity,
-    Volume2,
-    LineChart,
-    Gauge,
+    GitBranch,
+    Layers,
+    Shield,
+    Zap,
+    CheckCircle,
+    AlertTriangle,
     Info,
-    Code,
-    Calculator,
-    BookOpen,
-    AlertTriangle
+    XCircle,
+    Filter,
+    DollarSign
 } from 'lucide-react';
 
-// This metadata is extracted from the analysis.ts file
-const METHODOLOGY_VERSION = '3.0.0 SOTA';
-const LAST_UPDATED = '2024-11-29';
+// ============================================
+// SYSTEM METRICS (Updated with Veto System results)
+// ============================================
 
-interface CriterionDoc {
-    id: number;
-    key: string;
-    name: string;
-    subtitle: string;
-    icon: React.ElementType;
-    description: string;
-    objective: string;
-    dataSource: string;
-    calculation: string;
-    scoringLogic: {
-        condition: string;
-        score: number;
-        label: string;
-    }[];
-    formula?: string;
-    outputFields: string[];
-    limitations: string[];
-    codeReference: string;
-}
-
-const criteriaDocumentation: CriterionDoc[] = [
-    {
-        id: 1,
-        key: '1_market_condition',
-        name: 'Market Condition',
-        subtitle: 'The "Tide"',
-        icon: TrendingUp,
-        description: 'Determines if the overall market environment supports long positions. As the saying goes, "A rising tide lifts all boats" - trading with the market trend significantly increases success probability.',
-        objective: 'Ensure the broader market (SPY/SPX) is in a bullish configuration before taking long positions.',
-        dataSource: 'SPY (S&P 500 ETF) daily OHLCV data via Yahoo Finance API. VIX (Volatility Index) for market fear gauge.',
-        calculation: `
-1. **Primary Trend Check**: SPY current price vs 50-day SMA
-   - Bullish if Price > 50 SMA
-   
-2. **Golden Cross Alignment**: 50-day SMA vs 200-day SMA
-   - Bullish alignment when 50 SMA > 200 SMA (Golden Cross)
-   - Bearish when 50 SMA < 200 SMA (Death Cross)
-   
-3. **Volatility Filter**: VIX level check
-   - Safe environment when VIX < 25
-   - Elevated risk when VIX > 25`,
-        scoringLogic: [
-            { condition: 'SPY > 50 SMA AND Golden Cross AND VIX < 25', score: 10, label: 'Perfect Bull Market' },
-            { condition: 'SPY > 50 SMA AND Golden Cross', score: 8, label: 'Bull Market' },
-            { condition: 'SPY > 50 SMA only', score: 6, label: 'Neutral-Bullish' },
-            { condition: 'SPY < 50 SMA but Golden Cross', score: 4, label: 'Weakening' },
-            { condition: 'SPY < 50 SMA AND Death Cross', score: 2, label: 'Bear Market' }
-        ],
-        formula: `// Fetch SPY data
-const spxAbove50SMA = SPY.price > SMA(SPY.prices, 50)
-const goldenCross = SMA(SPY.prices, 50) > SMA(SPY.prices, 200)
-const vixSafe = VIX < 25
-
-// Score determination
-if (spxAbove50SMA && goldenCross && vixSafe) score = 10
-else if (spxAbove50SMA && goldenCross) score = 8
-else if (spxAbove50SMA) score = 6
-else if (!spxAbove50SMA && !goldenCross) score = 2
-else score = 4`,
-        outputFields: ['MARKET_STATUS: "BULLISH" | "BEARISH" | "NEUTRAL"', 'golden_cross: boolean', 'vix_level: number', 'vix_safe: boolean'],
-        limitations: [
-            'Uses SPY as proxy for overall market (not actual S&P 500 index)',
-            'VIX data may have slight delays',
-            'Does not account for sector rotation within the market'
-        ],
-        codeReference: 'analysis.ts:350-370'
+const SYSTEM_METRICS = {
+    version: '3.0.0',
+    lastUpdated: '2024-12-18',
+    modelType: 'Veto-Based ML Filter',
+    featureCount: 40,
+    trainingSamples: 50096,
+    signalTypes: ['Insider Buying', 'Politician Trades', 'Smart Money'],
+    backtest: {
+        totalSignals: 165,
+        signalsTaken: 153,
+        vetoRate: 7.3,
+        winRate: 41.2,
+        avgR: 0.269,
+        profitFactor: 1.44,
+        vetoPrecision: 83.3,
+        baselineWinRate: 39.4,
+        baselineProfitFactor: 1.34,
     },
-    {
-        id: 2,
-        key: '2_sector_condition',
-        name: 'Sector Condition',
-        subtitle: 'Relative Strength',
-        icon: Building2,
-        description: 'Ensures the stock belongs to a leading sector with positive money flow. Stocks in strong sectors have institutional tailwinds that support price appreciation.',
-        objective: 'Verify the sector is outperforming the broader market (SPY) - money is flowing INTO the sector.',
-        dataSource: 'Sector ETFs (XLK, XLF, XLV, XLE, etc.) compared to SPY over 20 and 60 trading days.',
-        calculation: `
-**Relative Strength (RS) Score Calculation:**
-
-1. Calculate sector ETF performance over 20 days:
-   \`Sector_20d_Change = (Today - 20_Days_Ago) / 20_Days_Ago × 100\`
-
-2. Calculate SPY performance over same period:
-   \`SPY_20d_Change = (Today - 20_Days_Ago) / 20_Days_Ago × 100\`
-
-3. Calculate RS Score:
-   \`RS_Score = Sector_Change / SPY_Change\`
-
-4. Repeat for 60-day period and average both RS scores.
-
-**Interpretation:**
-- RS > 1.0 = Sector outperforming market
-- RS < 1.0 = Sector underperforming market`,
-        scoringLogic: [
-            { condition: 'Average RS > 1.2 (Strong outperformance)', score: 10, label: 'Top 3 Sector' },
-            { condition: 'Average RS > 1.0 (Outperforming)', score: 8, label: 'Top 3 Sector' },
-            { condition: 'Average RS 0.8-1.0 (In-line)', score: 5, label: 'Middle Sector' },
-            { condition: 'Average RS < 0.8 (Underperforming)', score: 2, label: 'Bottom 3 Sector' }
-        ],
-        formula: `// Sector ETF mapping
-const SECTOR_ETFS = {
-  'Technology': 'XLK',
-  'Financial Services': 'XLF',
-  'Healthcare': 'XLV',
-  'Consumer Cyclical': 'XLY',
-  'Energy': 'XLE',
-  // ... all 11 sectors
-}
-
-// Calculate RS
-const sector20dChange = (sectorPrices[0] - sectorPrices[19]) / sectorPrices[19] * 100
-const spy20dChange = (spyPrices[0] - spyPrices[19]) / spyPrices[19] * 100
-const rs20d = sector20dChange / spy20dChange
-
-// Same for 60-day
-const avgRS = (rs20d + rs60d) / 2
-const outperforming = avgRS > 1.0`,
-        outputFields: ['sector_etf: string (XLK, XLF, etc.)', 'rs_score_20d: number', 'rs_score_60d: number', 'sector_rank: "TOP_3" | "MIDDLE" | "BOTTOM_3"', 'outperforming: boolean'],
-        limitations: [
-            'Limited to 11 major SPDR sector ETFs',
-            'Does not account for sub-industry strength',
-            'RS calculation assumes linear relationship'
-        ],
-        codeReference: 'analysis.ts:372-395'
-    },
-    {
-        id: 3,
-        key: '3_company_condition',
-        name: 'Company Condition',
-        subtitle: 'Fundamental Strength',
-        icon: Briefcase,
-        description: 'Verifies the company has fundamental tailwinds supporting the technical setup. Uses EODHD API for real earnings and revenue data when configured.',
-        objective: 'Check earnings surprise (EPS beat/miss) and revenue growth QoQ for fundamental validation.',
-        dataSource: 'EODHD API for fundamentals (earnings, revenue, financial statements). Falls back to Yahoo Finance market cap if EODHD not configured.',
-        calculation: `
-**With EODHD API (Premium - $20/mo):**
-1. **Earnings Surprise**: Compare EPS Actual vs EPS Expected
-   - Beat = EPS Actual > EPS Expected
-2. **Revenue Growth QoQ**: Calculate quarter-over-quarter change
-   - Growth = (Revenue Current - Revenue Previous) / Revenue Previous × 100
-
-**Scoring Logic:**
-- Score 10: Earnings beat + Revenue growth > 20%
-- Score 8: Earnings beat OR Revenue growth > 20%
-- Score 7: Revenue growth > 10%
-- Score 5: Neutral (no data or mixed signals)
-- Score 3: Earnings miss
-- Score 1: Earnings miss + Revenue declining
-
-**Fallback (No EODHD Key):**
-Uses Market Cap as proxy for company quality`,
-        scoringLogic: [
-            { condition: 'Earnings Beat + Revenue Growth > 20%', score: 10, label: 'Strong Fundamentals' },
-            { condition: 'Earnings Beat OR Revenue Growth > 20%', score: 8, label: 'Good Fundamentals' },
-            { condition: 'Revenue Growth > 10%', score: 7, label: 'Moderate Growth' },
-            { condition: 'Neutral / Mixed / No Data', score: 5, label: 'Neutral' },
-            { condition: 'Earnings Miss', score: 3, label: 'Weak' },
-            { condition: 'Earnings Miss + Revenue Declining', score: 1, label: 'Poor Fundamentals' }
-        ],
-        formula: `// With EODHD fundamentals data
-const fundamentals = await getFundamentals(ticker)
-
-if (fundamentals.data_available) {
-  const hasEarningsBeat = fundamentals.earnings_surprise
-  const hasStrongGrowth = fundamentals.revenue_growth_qoq > 20
-  const hasModerateGrowth = fundamentals.revenue_growth_qoq > 10
-  const hasEarningsMiss = eps_actual < eps_expected
-  const hasRevenueDeclining = revenue_growth_qoq < 0
-
-  if (hasEarningsBeat && hasStrongGrowth) score = 10
-  else if (hasEarningsBeat || hasStrongGrowth) score = 8
-  else if (hasModerateGrowth) score = 7
-  else if (hasEarningsMiss && hasRevenueDeclining) score = 1
-  else if (hasEarningsMiss) score = 3
-  else score = 5
-} else {
-  // Fallback: market cap scoring
-  if (marketCap > 50) score = 8
-  else if (marketCap > 10) score = 7
-  // ...
-}`,
-        outputFields: ['earnings_surprise: boolean', 'eps_actual: number', 'eps_expected: number', 'revenue_growth_qoq: number', 'meets_growth_threshold: boolean', 'market_cap: number'],
-        limitations: [
-            'EODHD API required for full functionality ($20/mo)',
-            'Falls back to market cap if API not configured',
-            'Earnings calendar/next earnings date partially implemented',
-            'Guidance analysis not yet implemented'
-        ],
-        codeReference: 'analysis.ts:503-535'
-    },
-    {
-        id: 4,
-        key: '4_catalyst',
-        name: 'Actual Game Changer',
-        subtitle: 'Catalyst & RVOL + Sentiment',
-        icon: Zap,
-        description: 'Combines RVOL (Relative Volume) with AI-powered sentiment analysis using Claude to detect catalysts and market interest.',
-        objective: 'Identify stocks with unusual activity (RVOL) and/or news catalysts using Claude AI for sentiment analysis.',
-        dataSource: 'Volume data from Yahoo Finance + Claude API (Haiku) for sentiment and catalyst detection.',
-        calculation: `
-**Relative Volume (RVOL) Calculation:**
-\`RVOL = Today's Volume / SMA(Volume, 30 days)\`
-
-**Claude Sentiment Analysis:**
-Uses Claude AI to analyze recent news and sentiment:
-- Sentiment Score: -1 (very negative) to +1 (very positive)
-- Catalyst Detection: Identifies mergers, FDA, earnings, contracts, etc.
-- Keywords: Extracts relevant catalyst keywords
-
-**Combined Scoring:**
-- Score 10: RVOL ≥ 2.0 + Positive catalyst detected
-- Score 9: Positive catalyst detected (merger, FDA, etc.)
-- Score 8: RVOL ≥ 2.0
-- Score 7: RVOL ≥ 1.5 OR mild positive sentiment
-- Score 5: Neutral
-- Score 3: Negative sentiment detected`,
-        scoringLogic: [
-            { condition: 'RVOL ≥ 2.0 + Positive Catalyst + Positive Sentiment', score: 10, label: 'Strong Catalyst' },
-            { condition: 'Positive Catalyst Detected (merger, FDA, etc.)', score: 9, label: 'Catalyst Present' },
-            { condition: 'RVOL ≥ 2.0x (High volume interest)', score: 8, label: 'High Interest' },
-            { condition: 'RVOL ≥ 1.5x OR Mild Positive Sentiment', score: 7, label: 'Moderate Interest' },
-            { condition: 'Neutral (no catalyst, normal volume)', score: 5, label: 'Neutral' },
-            { condition: 'Negative Sentiment Detected', score: 3, label: 'Caution' }
-        ],
-        formula: `// Volume analysis
-const avgVolume30 = SMA(volumes, 30)
-const rvol = currentVolume / avgVolume30
-const highRvol = rvol >= 2.0
-
-// Claude sentiment analysis
-const sentiment = await analyzeSentiment(ticker)
-const positiveSentiment = sentiment.sentiment_score > 0.3
-const negativeSentiment = sentiment.sentiment_score < -0.3
-
-// Combined scoring
-if (highRvol && sentiment.catalyst_detected && positiveSentiment) {
-  score = 10  // Perfect storm: volume + catalyst + sentiment
-} else if (sentiment.catalyst_detected && positiveSentiment) {
-  score = 9   // Catalyst detected
-} else if (highRvol) {
-  score = 8   // High volume alone
-} else if (rvol >= 1.5 || positiveSentiment) {
-  score = 7   // Moderate interest
-} else if (negativeSentiment) {
-  score = 3   // Negative sentiment warning
-} else {
-  score = 5   // Neutral
-}`,
-        outputFields: ['has_catalyst: boolean', 'rvol: number', 'sentiment_score: number (-1 to +1)', 'sentiment_label: string', 'catalyst_detected: boolean', 'catalyst_keywords: string[]', 'summary: string'],
-        limitations: [
-            'Claude API required for sentiment analysis',
-            'Uses Claude Haiku model (cost: ~$0.00025/call)',
-            'Sentiment based on Claude knowledge cutoff, not real-time news',
-            'Results cached for 1 hour to reduce API costs'
-        ],
-        codeReference: 'analysis.ts:537-575'
-    },
-    {
-        id: 5,
-        key: '5_patterns_gaps',
-        name: 'Patterns & Gaps',
-        subtitle: 'Technical Setups',
-        icon: BarChart3,
-        description: 'Programmatically identifies high-probability technical setups like gap-ups and bull flags that indicate potential continuation moves.',
-        objective: 'Detect actionable chart patterns that historically precede strong price moves.',
-        dataSource: 'Daily OHLCV data from Yahoo Finance.',
-        calculation: `
-**Gap-Up Detection:**
-A breakaway gap occurs when today's Open > yesterday's High by at least 2%:
-\`Gap% = (Open[Today] - High[Yesterday]) / High[Yesterday] × 100\`
-Gap detected if Gap% ≥ 2%
-
-**Bull Flag Detection:**
-1. **Pole Phase**: Price increase > 10% in less than 5 days
-2. **Flag Phase (Consolidation)**: Price drifts sideways/down for 3-10 days
-3. **Validity Check**: Consolidation must NOT retrace > 50% of the pole
-
-**Breakout Detection:**
-Current Price > 50-day Swing High AND RVOL > 1.2x`,
-        scoringLogic: [
-            { condition: 'Breakout: Price > Swing High + Volume confirmation', score: 10, label: 'Breakout' },
-            { condition: 'Gap Up ≥ 2%', score: 9, label: 'Gap Up' },
-            { condition: 'Bull Flag detected (Pole + Flag)', score: 9, label: 'Bull Flag' },
-            { condition: 'No significant pattern', score: 4, label: 'None' }
-        ],
-        formula: `// Gap Detection
-const gapPercent = (opens[0] - highs[1]) / highs[1] * 100
-const gapDetected = gapPercent >= 2
-
-// Bull Flag Detection
-function detectBullFlag(prices, highs, lows) {
-  // Find pole: >10% gain in <5 days
-  for (i = 5; i < 15; i++) {
-    const gain = (prices[i-5] - prices[i]) / prices[i] * 100
-    if (gain >= 10) poleFound = true
-  }
-  // Check consolidation: 3-10 days, <50% retracement
-  // ... consolidation logic
-  return { detected, poleGain, consolidationDays }
-}
-
-// Pattern scoring
-if (currentPrice > swingHigh && rvol > 1.2) pattern = 'BREAKOUT', score = 10
-else if (gapDetected) pattern = 'GAP_UP', score = 9
-else if (bullFlag.detected) pattern = 'BULL_FLAG', score = 9
-else pattern = 'NONE', score = 4`,
-        outputFields: ['pattern: "BULL_FLAG" | "GAP_UP" | "BREAKOUT" | "NONE"', 'gap_detected: boolean', 'gap_percent: number', 'bull_flag_detected: boolean', 'pole_gain: number', 'consolidation_days: number'],
-        limitations: [
-            'Limited to gap-up, bull flag, and breakout patterns',
-            'Does not detect head & shoulders, cup & handle, etc.',
-            'Simple implementation may miss complex formations'
-        ],
-        codeReference: 'analysis.ts:430-450'
-    },
-    {
-        id: 6,
-        key: '6_support_resistance',
-        name: 'Support & Resistance',
-        subtitle: 'Risk Management Zones',
-        icon: Target,
-        description: 'Defines precise entry/exit zones using dynamic support levels and ATR-based stop losses. The foundation of proper position sizing and risk management.',
-        objective: 'Calculate stop loss, take profit, and verify favorable Risk:Reward ratio ≥ 2:1.',
-        dataSource: 'Daily OHLCV for swing points, ATR calculation from price ranges.',
-        calculation: `
-**Dynamic Support Detection:**
-1. Check if price is within 2-3% of 20-day or 50-day EMA
-2. Identify Swing Low = Lowest low of last 10 trading days
-
-**ATR (Average True Range) Calculation:**
-For each of the last 14 days:
-\`True Range = MAX(High-Low, |High-PrevClose|, |Low-PrevClose|)\`
-\`ATR = Average(True Ranges over 14 days)\`
-
-**Stop Loss Calculation:**
-\`Stop Loss = Swing Low - (1% × ATR)\`
-
-**Take Profit & Risk:Reward:**
-\`Risk = Entry Price - Stop Loss\`
-\`Take Profit = Entry Price + (2 × Risk)\`
-\`R:R Ratio = (TP - Entry) / (Entry - SL)\`
-
-**Pass Criteria:** R:R ≥ 2.0`,
-        scoringLogic: [
-            { condition: 'R:R ≥ 2.0 AND near EMA support', score: 10, label: 'Perfect Entry' },
-            { condition: 'R:R ≥ 2.0', score: 8, label: 'Good R:R' },
-            { condition: 'Near 20 or 50 EMA support only', score: 6, label: 'Support Zone' },
-            { condition: 'R:R < 2.0 and not near support', score: 4, label: 'Poor Setup' }
-        ],
-        formula: `// ATR Calculation
-function calculateATR(highs, lows, closes, period = 14) {
-  let atrSum = 0
-  for (i = 0; i < period; i++) {
-    const tr = Math.max(
-      highs[i] - lows[i],
-      Math.abs(highs[i] - closes[i+1]),
-      Math.abs(lows[i] - closes[i+1])
-    )
-    atrSum += tr
-  }
-  return atrSum / period
-}
-
-// Support levels
-const swingLow = Math.min(...lows.slice(0, 10))
-const nearEma20 = Math.abs(price - ema20) / ema20 <= 0.03
-const nearEma50 = Math.abs(price - ema50) / ema50 <= 0.03
-
-// Risk management
-const stopLoss = swingLow - (0.01 * atr)
-const risk = price - stopLoss
-const takeProfit = price + (2 * risk)
-const rrRatio = (takeProfit - price) / risk
-const rrPasses = rrRatio >= 2.0`,
-        outputFields: ['swing_low: number', 'atr: number', 'stop_loss_level: number', 'take_profit_level: number', 'risk_reward_ratio: number', 'rr_passes: boolean', 'near_ema20: boolean', 'near_ema50: boolean'],
-        limitations: [
-            'Uses simple swing low (10-day), not pivot point analysis',
-            'Single ATR period (14) used',
-            'Does not identify historical support/resistance zones'
-        ],
-        codeReference: 'analysis.ts:452-478'
-    },
-    {
-        id: 7,
-        key: '7_price_movement',
-        name: 'Price Action',
-        subtitle: 'Trend Structure',
-        icon: Activity,
-        description: 'Confirms the stock is in an uptrend by analyzing the sequence of highs and lows. Higher highs and higher lows define a healthy uptrend.',
-        objective: 'Verify trend structure (HH/HL) and detect reversal candlestick patterns at support.',
-        dataSource: 'Daily OHLCV candlestick data.',
-        calculation: `
-**Higher Highs / Higher Lows Check:**
-1. Today's Low > Lowest low of last 5 days (Higher Low confirmed)
-2. Today's High > Highest high of last 5 days (Higher High confirmed)
-
-**Hammer Candlestick Detection:**
-A hammer at support signals potential reversal:
-1. Total Range > 3× Body Size
-2. Lower Wick Ratio > 60% of total range
-\`Hammer = (High - Low) > 3 × |Open - Close| AND\`
-\`         (Min(Open,Close) - Low) / (High - Low) > 0.6\``,
-        scoringLogic: [
-            { condition: 'Higher Highs + Higher Lows + Hammer', score: 10, label: 'Strong Uptrend + Confirmation' },
-            { condition: 'Higher Highs + Higher Lows', score: 9, label: 'Confirmed Uptrend' },
-            { condition: 'Higher Lows only', score: 7, label: 'Building Uptrend' },
-            { condition: 'No trend structure', score: 5, label: 'Consolidation' },
-            { condition: 'Lower Highs + Lower Lows', score: 2, label: 'Downtrend' }
-        ],
-        formula: `// Higher Highs / Higher Lows
-const todayLow = lows[0]
-const lowestOf5 = Math.min(...lows.slice(1, 6))
-const higherLows = todayLow > lowestOf5
-
-const todayHigh = highs[0]
-const highestOf5 = Math.max(...highs.slice(1, 6))
-const higherHighs = todayHigh > highestOf5
-
-// Hammer detection
-function detectHammer(open, high, low, close) {
-  const bodySize = Math.abs(close - open)
-  const totalRange = high - low
-  const lowerWick = Math.min(open, close) - low
-  
-  const hasLongLowerWick = totalRange > 3 * bodySize
-  const wickRatio = lowerWick / totalRange
-  
-  return hasLongLowerWick && wickRatio > 0.6
-}
-
-// Trend status
-if (higherHighs && higherLows) trend = 'UPTREND'
-else if (!higherHighs && !higherLows) trend = 'DOWNTREND'
-else trend = 'CONSOLIDATION'`,
-        outputFields: ['trend: "UPTREND" | "DOWNTREND" | "CONSOLIDATION"', 'recent_higher_lows: boolean', 'recent_higher_highs: boolean', 'hammer_detected: boolean', 'candle_confirmation: string'],
-        limitations: [
-            'Only detects Hammer pattern (no engulfing, doji, etc.)',
-            'Simple 5-day lookback for HH/HL',
-            'Does not analyze multiple timeframes'
-        ],
-        codeReference: 'analysis.ts:480-498'
-    },
-    {
-        id: 8,
-        key: '8_volume',
-        name: 'Volume Profile',
-        subtitle: 'The "Lie Detector" - SOTA UPGRADED',
-        icon: Volume2,
-        description: '🚀 SOTA UPGRADE: Professional-grade volume analysis using OBV (On-Balance Volume), CMF (Chaikin Money Flow), and RVOL to detect smart money accumulation vs distribution.',
-        objective: 'Detect institutional buying/selling through advanced volume metrics. Distinguishes smart money activity from retail noise.',
-        dataSource: 'Daily OHLCV data from Yahoo Finance. Calculates OBV, CMF(20), and RVOL(30).',
-        calculation: `
-**SOTA Volume Profile Analysis:**
-
-1. **On-Balance Volume (OBV):**
-   Cumulative volume indicator that adds volume on up-days and subtracts on down-days.
-   \`OBV = Σ(volume on up days) - Σ(volume on down days)\`
-   - OBV Trend UP = Smart money accumulating
-   - OBV Trend DOWN = Smart money distributing
-
-2. **Chaikin Money Flow (CMF):**
-   Measures buying/selling pressure based on where price closes within the range.
-   \`Money Flow Multiplier = ((Close - Low) - (High - Close)) / (High - Low)\`
-   \`CMF = Sum(MF Multiplier × Volume) / Sum(Volume) over 20 days\`
-   - CMF > 0 = Money flowing IN (buying pressure)
-   - CMF < 0 = Money flowing OUT (selling pressure)
-
-3. **Relative Volume (RVOL):**
-   \`RVOL = Current Volume / 30-day Average Volume\`
-   - RVOL ≥ 2.0 = Very High (unusual activity)
-   - RVOL ≥ 1.5 = High
-   - RVOL 0.75-1.5 = Normal
-
-4. **Smart Money Signal:**
-   Combines all metrics to determine institutional activity.`,
-        scoringLogic: [
-            { condition: 'STRONG_ACCUMULATION: All 4 signals positive + RVOL > 1.5', score: 10, label: 'Strong Accumulation' },
-            { condition: 'ACCUMULATION: OBV UP + CMF positive + Price rising', score: 8, label: 'Accumulation' },
-            { condition: 'NEUTRAL: Mixed signals', score: 5, label: 'Neutral' },
-            { condition: 'DISTRIBUTION: OBV DOWN + CMF negative', score: 3, label: 'Distribution' },
-            { condition: 'STRONG_DISTRIBUTION: All signals negative', score: 1, label: 'Strong Distribution' }
-        ],
-        formula: `// SOTA Volume Profile Calculation
-const volumeProfile = calculateVolumeProfile(opens, highs, lows, closes, volumes)
-
-// On-Balance Volume (OBV)
-function calculateOBV(prices, volumes) {
-  let obv = 0
-  for (i = prices.length - 2; i >= 0; i--) {
-    if (prices[i] > prices[i + 1]) obv += volumes[i]
-    else if (prices[i] < prices[i + 1]) obv -= volumes[i]
-  }
-  return obv
-}
-
-// Chaikin Money Flow (CMF)
-function calculateCMF(highs, lows, closes, volumes, period = 20) {
-  let moneyFlowVolume = 0, totalVolume = 0
-  for (i = 0; i < period; i++) {
-    const mfMultiplier = ((closes[i] - lows[i]) - (highs[i] - closes[i])) / (highs[i] - lows[i])
-    moneyFlowVolume += mfMultiplier * volumes[i]
-    totalVolume += volumes[i]
-  }
-  return moneyFlowVolume / totalVolume
-}
-
-// Combined Score
-const score = (rvolScore * 0.3) + (obvScore * 0.35) + (cmfScore * 0.35)
-
-// Smart Money Signal
-if (obv.trend === 'UP' && cmf.isPositive && priceContext.nearHigh)
-  smartMoneySignal = 'BUYING'`,
-        outputFields: ['rvol: number (ratio vs 30-day avg)', 'obv_trending: boolean', 'obv_value: number', 'cmf_value: number (-1 to +1)', 'cmf_positive: boolean', 'interpretation: string', 'smart_money_signal: "BUYING" | "SELLING" | "NEUTRAL"'],
-        limitations: [
-            '✅ Now uses OBV for trend detection',
-            '✅ Now uses CMF for money flow analysis',
-            '✅ Detects institutional activity patterns',
-            'Does not include VWAP analysis (intraday required)'
-        ],
-        codeReference: 'volume-profile/calculator.ts'
-    },
-    {
-        id: 9,
-        key: '9_ma_fibonacci',
-        name: 'Averages & Fibonacci',
-        subtitle: 'Algorithmic Support Levels',
-        icon: LineChart,
-        description: 'Uses moving averages and Fibonacci retracement levels to identify optimal "buy zones" where price has pulled back to support.',
-        objective: 'Confirm price is above key MAs (200 SMA, 20 EMA) and identify Fibonacci buy zones.',
-        dataSource: 'Daily closing prices for MA calculation, swing high/low for Fibonacci levels.',
-        calculation: `
-**Key Moving Average Checks:**
-1. Price > 200-day SMA (Long-term trend is UP)
-2. Price > 20-day EMA (Short-term momentum positive)
-
-**Fibonacci Retracement Levels:**
-From Last Major Low to Last Major High (50-day range):
-- 0.382 Level = High - (Range × 0.382)
-- 0.500 Level = High - (Range × 0.500)
-- 0.618 Level = High - (Range × 0.618)
-
-**Buy Zone Identification:**
-Price is in a buy zone if within 2% of any Fibonacci level (0.382, 0.500, or 0.618)`,
-        scoringLogic: [
-            { condition: 'Above 200 SMA + Above 20 EMA + In Fib Buy Zone', score: 10, label: 'Perfect Dip Buy' },
-            { condition: 'Above 200 SMA + Above 20 EMA', score: 8, label: 'Bullish Alignment' },
-            { condition: 'Above 200 SMA only', score: 6, label: 'Long-term Bullish' },
-            { condition: 'Below 200 SMA', score: 3, label: 'Below Major Support' }
-        ],
-        formula: `// Moving Average checks
-const priceAbove200SMA = currentPrice > SMA(prices, 200)
-const priceAbove20EMA = currentPrice > EMA(prices, 20)
-
-// Fibonacci calculation
-const swingHigh = Math.max(...highs.slice(0, 50))
-const swingLow = Math.min(...lows.slice(0, 50))
-const range = swingHigh - swingLow
-
-const fibLevels = {
-  level_382: swingHigh - (range * 0.382),
-  level_500: swingHigh - (range * 0.500),
-  level_618: swingHigh - (range * 0.618)
-}
-
-// Check if in buy zone (within 2% of any fib level)
-function isInFibBuyZone(price, fibLevels, tolerance = 0.02) {
-  for (level of [level_382, level_500, level_618]) {
-    if (Math.abs(price - level) / level <= tolerance)
-      return { inZone: true, level }
-  }
-  return { inZone: false, level: 'N/A' }
-}`,
-        outputFields: ['price_above_200sma: boolean', 'price_above_20ema: boolean', 'fib_levels: { level_382, level_500, level_618 }', 'in_fib_buy_zone: boolean', 'fib_level_current: string'],
-        limitations: [
-            'Uses 50-day range for Fibonacci (may miss larger swings)',
-            'Does not calculate Fibonacci extensions for targets',
-            'Single tolerance (2%) for buy zone detection'
-        ],
-        codeReference: 'analysis.ts:522-545'
-    },
-    {
-        id: 10,
-        key: '10_rsi',
-        name: 'RSI Momentum',
-        subtitle: 'Adaptive RSI + Divergence - SOTA UPGRADED',
-        icon: Gauge,
-        description: '🚀 SOTA UPGRADE: Adaptive RSI thresholds based on volatility (ATR) + RSI/MACD divergence detection for early exit signals. Handles volatile stocks differently than stable ones.',
-        objective: 'Dynamic RSI zones based on stock volatility. Detect momentum divergences for early reversal warnings.',
-        dataSource: 'Daily OHLCV for RSI + ATR calculation. 20-day lookback for divergence detection.',
-        calculation: `
-**SOTA Adaptive RSI Thresholds:**
-
-RSI zones adjust based on ATR (Average True Range) as % of price:
-- Low Volatility (ATR < 1%): Tighter ranges (35-65)
-- Normal Volatility (1-3%): Standard ranges (30-70)
-- High Volatility (3-5%): Wider ranges (25-75)
-- Extreme Volatility (>5%): Very wide ranges (20-80)
-
-**Divergence Detection:**
-
-1. **Regular Bullish Divergence:**
-   Price makes Lower Low, RSI makes Higher Low
-   → Momentum increasing despite price drop = Reversal UP signal
-
-2. **Regular Bearish Divergence:**
-   Price makes Higher High, RSI makes Lower High
-   → Momentum weakening despite price rise = EXIT SIGNAL ⚠️
-
-3. **Hidden Bullish Divergence:**
-   Price makes Higher Low, RSI makes Lower Low
-   → Uptrend continuation signal
-
-4. **Hidden Bearish Divergence:**
-   Price makes Lower High, RSI makes Higher High
-   → Downtrend continuation (EXIT)`,
-        scoringLogic: [
-            { condition: 'OPTIMAL_BUY zone + No bearish divergence', score: 10, label: 'Optimal Entry' },
-            { condition: 'OPTIMAL_BUY zone + Bullish divergence detected', score: 10, label: 'Strong Buy Signal' },
-            { condition: 'NEUTRAL zone + Positive momentum', score: 7, label: 'Acceptable' },
-            { condition: 'Any zone + Bearish divergence (strength ≥5)', score: 4, label: '⚠️ EXIT WARNING' },
-            { condition: 'OVERBOUGHT zone (adaptive threshold)', score: 3, label: 'Caution' },
-            { condition: 'EXTREME zone', score: 1, label: 'Avoid' }
-        ],
-        formula: `// SOTA Adaptive RSI Analysis
-const adaptiveRSI = analyzeAdaptiveRSI(rsi, atr, currentPrice)
-
-// Calculate adaptive thresholds based on volatility
-function calculateAdaptiveRSIThresholds(atr, currentPrice) {
-  const atrPercent = (atr / currentPrice) * 100
-  const volatilityFactor = atrPercent / 2  // Scale factor
-  
-  return {
-    oversold: Math.max(15, 30 - (volatilityFactor * 5)),
-    overbought: Math.min(85, 70 + (volatilityFactor * 5)),
-    optimalBuyLow: 40 - (volatilityFactor / 2),
-    optimalBuyHigh: 55 + (volatilityFactor / 2)
-  }
-}
-
-// Divergence Detection
-function detectRSIDivergence(prices, rsiValues) {
-  // Find swing lows in price and RSI
-  const priceLows = findSwingLows(prices)
-  const rsiLows = findSwingLows(rsiValues)
-  
-  // REGULAR BULLISH: Price lower-low, RSI higher-low
-  if (priceLows[0] < priceLows[1] && rsiLows[0] > rsiLows[1])
-    return { type: 'REGULAR_BULLISH', implication: 'ENTRY_SIGNAL' }
-  
-  // REGULAR BEARISH: Price higher-high, RSI lower-high
-  if (priceHighs[0] > priceHighs[1] && rsiHighs[0] < rsiHighs[1])
-    return { type: 'REGULAR_BEARISH', implication: 'EXIT_SIGNAL' }
-}
-
-// Apply divergence adjustments
-if (divergence.implication === 'EXIT_SIGNAL' && divergence.strength >= 5)
-  rsiScore = Math.max(2, rsiScore - 3)  // Reduce score
-else if (divergence.implication === 'ENTRY_SIGNAL' && divergence.strength >= 5)
-  rsiScore = Math.min(10, rsiScore + 2)  // Increase score`,
-        outputFields: ['value: number', 'zone: "OVERSOLD" | "OPTIMAL_BUY" | "NEUTRAL" | "OVERBOUGHT" | "EXTREME"', 'adaptive_oversold: number', 'adaptive_overbought: number', 'divergence_type: string', 'divergence_implication: "ENTRY_SIGNAL" | "EXIT_SIGNAL" | "NEUTRAL"', 'divergence_strength: number (0-10)'],
-        limitations: [
-            '✅ Now uses adaptive thresholds based on ATR',
-            '✅ Now detects RSI divergences (bullish/bearish)',
-            '✅ Now detects MACD divergences',
-            '✅ Provides early exit signals for reversals',
-            'Divergence detection uses 20-day lookback (may miss longer-term patterns)'
-        ],
-        codeReference: 'momentum/divergence-detector.ts + adaptive-rsi.ts'
-    }
-];
-
-// Success Probability Formula Documentation
-const probabilityDoc = {
-    title: 'Success Probability Calculation',
-    description: 'The overall success probability is calculated by summing all 10 criterion scores (each 0-10) and expressing as a percentage out of 100.',
-    formula: `totalScore = Σ(criterion[1..10].score)  // Max: 100
-successProbability = totalScore%`,
-    interpretation: [
-        { range: '≥ 80%', rating: 'HIGH', recommendation: 'BUY - STRONG', color: 'emerald' },
-        { range: '70-79%', rating: 'HIGH', recommendation: 'BUY', color: 'emerald' },
-        { range: '50-69%', rating: 'MODERATE', recommendation: 'HOLD / WATCH', color: 'amber' },
-        { range: '< 50%', rating: 'LOW', recommendation: 'AVOID', color: 'red' }
-    ]
+    threshold: 60,
 };
 
-function CriterionCard({ criterion, isExpanded, onToggle }: { 
-    criterion: CriterionDoc; 
-    isExpanded: boolean;
-    onToggle: () => void;
+// ============================================
+// SECTION COMPONENTS
+// ============================================
+
+function MetricCard({ label, value, unit = '%', change, isGood = true }: {
+    label: string;
+    value: number;
+    unit?: string;
+    change?: number;
+    isGood?: boolean;
 }) {
-    const Icon = criterion.icon;
-    
     return (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <button
-                onClick={onToggle}
-                className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-            >
-                <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center">
-                        <Icon className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="text-left">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-500">
-                                #{criterion.id}
-                            </span>
-                            <h3 className="font-semibold text-gray-900">{criterion.name}</h3>
-                            <span className="text-xs text-teal-600 font-medium">({criterion.subtitle})</span>
-                        </div>
-                        <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">{criterion.objective}</p>
-                    </div>
-                </div>
-                {isExpanded ? (
-                    <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                ) : (
-                    <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                )}
-            </button>
-            
-            {isExpanded && (
-                <div className="px-6 pb-6 border-t border-gray-100 pt-4 space-y-6 animate-fade-in">
-                    {/* Objective */}
-                    <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
-                        <h4 className="text-sm font-semibold text-teal-800 mb-1">🎯 Objective</h4>
-                        <p className="text-sm text-teal-700">{criterion.objective}</p>
-                    </div>
-                    
-                    {/* Description */}
-                    <div>
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                            <Info className="w-4 h-4" /> Description
-                        </h4>
-                        <p className="text-sm text-gray-600">{criterion.description}</p>
-                    </div>
-                    
-                    {/* Data Source */}
-                    <div>
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                            <BookOpen className="w-4 h-4" /> Data Source
-                        </h4>
-                        <p className="text-sm text-gray-600">{criterion.dataSource}</p>
-                    </div>
-                    
-                    {/* Calculation Method */}
-                    <div>
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                            <Calculator className="w-4 h-4" /> Calculation Method
-                        </h4>
-                        <div className="text-sm text-gray-600 whitespace-pre-line bg-gray-50 p-4 rounded-lg border border-gray-200">
-                            {criterion.calculation}
-                        </div>
-                    </div>
-                    
-                    {/* Formula */}
-                    {criterion.formula && (
-                        <div>
-                            <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                                <Code className="w-4 h-4" /> Implementation (Pseudocode)
-                            </h4>
-                            <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded-lg overflow-x-auto font-mono">
-                                {criterion.formula}
-                            </pre>
-                        </div>
-                    )}
-                    
-                    {/* Scoring Logic Table */}
-                    <div>
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Scoring Rules</h4>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="bg-gray-50">
-                                        <th className="px-3 py-2 text-left font-medium text-gray-600">Condition</th>
-                                        <th className="px-3 py-2 text-center font-medium text-gray-600 w-20">Score</th>
-                                        <th className="px-3 py-2 text-left font-medium text-gray-600 w-40">Label</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {criterion.scoringLogic.map((rule, idx) => (
-                                        <tr key={idx} className="hover:bg-gray-50">
-                                            <td className="px-3 py-2 text-gray-700 text-xs">{rule.condition}</td>
-                                            <td className="px-3 py-2 text-center">
-                                                <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm ${
-                                                    rule.score >= 8 ? 'bg-emerald-100 text-emerald-700' :
-                                                    rule.score >= 6 ? 'bg-amber-100 text-amber-700' :
-                                                    rule.score >= 4 ? 'bg-orange-100 text-orange-700' :
-                                                    'bg-red-100 text-red-700'
-                                                }`}>
-                                                    {rule.score}
-                                                </span>
-                                            </td>
-                                            <td className="px-3 py-2 text-gray-600 text-xs">{rule.label}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    
-                    {/* Output Fields */}
-                    <div>
-                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Output Fields</h4>
-                        <div className="flex flex-wrap gap-2">
-                            {criterion.outputFields.map((field, idx) => (
-                                <code key={idx} className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-700">
-                                    {field}
-                                </code>
-                            ))}
-                        </div>
-                    </div>
-                    
-                    {/* Limitations */}
-                    <div>
-                        <h4 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4" /> Current Limitations
-                        </h4>
-                        <ul className="text-sm text-gray-600 space-y-1">
-                            {criterion.limitations.map((limitation, idx) => (
-                                <li key={idx} className="flex items-start gap-2">
-                                    <span className="text-amber-500 mt-1">•</span>
-                                    {limitation}
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                    
-                    {/* Code Reference */}
-                    <div className="flex items-center gap-2 text-xs text-gray-400 pt-2 border-t border-gray-100">
-                        <Code className="w-3 h-3" />
-                        <span>Source: <code className="bg-gray-100 px-1.5 py-0.5 rounded">{criterion.codeReference}</code></span>
-                    </div>
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{label}</div>
+            <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-semibold text-gray-900">{value.toFixed(1)}</span>
+                <span className="text-sm text-gray-500">{unit}</span>
+            </div>
+            {change !== undefined && (
+                <div className={`text-xs mt-1 ${isGood ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {change >= 0 ? '+' : ''}{change.toFixed(1)}{unit} vs baseline
                 </div>
             )}
         </div>
     );
 }
 
-function ScoreDiagram() {
+function ExpandableSection({ title, icon: Icon, children, defaultOpen = false }: {
+    title: string;
+    icon: React.ElementType;
+    children: React.ReactNode;
+    defaultOpen?: boolean;
+}) {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
+
     return (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Score Aggregation Flow</h3>
-            <div className="flex flex-col items-center">
-                {/* Criteria grid */}
-                <div className="grid grid-cols-5 gap-2 mb-4 w-full max-w-2xl">
-                    {['Market', 'Sector', 'Company', 'Catalyst', 'Patterns'].map((name, i) => (
-                        <div key={i} className="bg-teal-50 border border-teal-200 rounded-lg p-2 text-center">
-                            <div className="text-[10px] text-teal-600 font-medium">#{i + 1}</div>
-                            <div className="text-xs font-medium text-teal-800 truncate">{name}</div>
-                            <div className="text-lg font-bold text-teal-700">0-10</div>
-                        </div>
-                    ))}
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full px-5 py-4 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+            >
+                <div className="flex items-center gap-3">
+                    <Icon className="w-5 h-5 text-gray-600" />
+                    <span className="font-medium text-gray-900">{title}</span>
                 </div>
-                <div className="grid grid-cols-5 gap-2 mb-4 w-full max-w-2xl">
-                    {['S/R', 'Price', 'Volume', 'MA/Fib', 'RSI'].map((name, i) => (
-                        <div key={i} className="bg-teal-50 border border-teal-200 rounded-lg p-2 text-center">
-                            <div className="text-[10px] text-teal-600 font-medium">#{i + 6}</div>
-                            <div className="text-xs font-medium text-teal-800 truncate">{name}</div>
-                            <div className="text-lg font-bold text-teal-700">0-10</div>
-                        </div>
-                    ))}
+                {isOpen ? (
+                    <ChevronDown className="w-5 h-5 text-gray-400" />
+                ) : (
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                )}
+            </button>
+            {isOpen && (
+                <div className="px-5 py-4 bg-white border-t border-gray-200">
+                    {children}
                 </div>
-                
-                {/* Arrow down */}
-                <div className="flex flex-col items-center my-2">
-                    <div className="w-0.5 h-4 bg-gray-300"></div>
-                    <div className="w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-gray-300"></div>
-                </div>
-                
-                {/* Sum */}
-                <div className="bg-gray-100 border-2 border-gray-300 rounded-xl px-6 py-3 text-center mb-4">
-                    <div className="text-sm text-gray-600">Sum All Scores</div>
-                    <div className="font-mono text-lg font-bold text-gray-800">Σ = 0-100</div>
-                </div>
-                
-                {/* Arrow down */}
-                <div className="flex flex-col items-center my-2">
-                    <div className="w-0.5 h-4 bg-gray-300"></div>
-                    <div className="w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-gray-300"></div>
-                </div>
-                
-                {/* Result */}
-                <div className="bg-gradient-to-br from-teal-500 to-teal-600 rounded-xl px-8 py-4 text-center text-white shadow-lg">
-                    <div className="text-sm opacity-90">Success Probability</div>
-                    <div className="font-mono text-2xl font-bold">X%</div>
-                </div>
-            </div>
+            )}
         </div>
     );
 }
 
-function InterpretationTable() {
+function FeatureTable() {
+    const featureCategories = [
+        {
+            category: 'Price vs Moving Averages',
+            features: [
+                { name: 'priceVsSma20', description: 'Price distance from 20-day SMA (%)' },
+                { name: 'priceVsSma50', description: 'Price distance from 50-day SMA (%)' },
+                { name: 'priceVsEma9', description: 'Price distance from 9-day EMA (%)' },
+                { name: 'sma20VsSma50', description: '20 SMA vs 50 SMA relationship (%)' },
+                { name: 'ema9VsEma21', description: '9 EMA vs 21 EMA crossover (%)' },
+            ]
+        },
+        {
+            category: 'Position & Range',
+            features: [
+                { name: 'positionInRange', description: 'Position within 52-week range (0-1)' },
+                { name: 'pullbackFromHigh', description: 'Distance from 52-week high (%)' },
+                { name: 'bbPosition', description: 'Position within Bollinger Bands (0-1)' },
+            ]
+        },
+        {
+            category: 'Volatility & Volume',
+            features: [
+                { name: 'atrPercent', description: 'ATR as percentage of price' },
+                { name: 'volumeRatio', description: 'Current volume vs 20-day average' },
+                { name: 'volRegime', description: 'ATR percentile (volatility regime)' },
+            ]
+        },
+        {
+            category: 'Momentum Indicators',
+            features: [
+                { name: 'rsi14', description: 'Relative Strength Index (14-period)' },
+                { name: 'momentum5', description: '5-day price momentum (%)' },
+                { name: 'momentum10', description: '10-day price momentum (%)' },
+                { name: 'momentum20', description: '20-day price momentum (%)' },
+                { name: 'momentum60', description: '60-day price momentum (%)' },
+                { name: 'momAccel5', description: 'Momentum acceleration (5d vs 10d)' },
+                { name: 'momAccel10', description: 'Momentum acceleration (10d vs 20d)' },
+            ]
+        },
+        {
+            category: 'Trend & Pattern',
+            features: [
+                { name: 'smaSlope', description: '5-day slope of 20 SMA (%)' },
+                { name: 'trendConsistency5', description: 'Bullish candles in last 5 days (%)' },
+                { name: 'trendConsistency10', description: 'Bullish candles in last 10 days (%)' },
+                { name: 'candleBodyRatio', description: 'Candle body vs total range' },
+                { name: 'isBullish', description: 'Current candle is bullish (0/1)' },
+                { name: 'isBreakout', description: 'Near 52-week high breakout (0/1)' },
+            ]
+        },
+        {
+            category: 'Binary Indicators',
+            features: [
+                { name: 'aboveSma20', description: 'Price above 20 SMA (0/1)' },
+                { name: 'aboveSma50', description: 'Price above 50 SMA (0/1)' },
+            ]
+        },
+        {
+            category: 'Interaction Features',
+            features: [
+                { name: 'oversoldBounce', description: 'RSI < 40 AND above 50 SMA' },
+                { name: 'overboughtWarning', description: 'RSI > 70 AND below 20 SMA' },
+                { name: 'trendWithMom', description: 'Above 50 SMA AND momentum > 0' },
+                { name: 'pullbackInUptrend', description: 'Above 50 SMA but below 20 SMA' },
+                { name: 'breakoutWithVol', description: 'Breakout with high volume' },
+                { name: 'lowVolBreakout', description: 'Breakout with low volume (warning)' },
+                { name: 'highVolConsolidation', description: 'High volume during consolidation' },
+                { name: 'acceleratingUp', description: 'Positive momentum accelerating' },
+                { name: 'deceleratingDown', description: 'Negative momentum slowing' },
+                { name: 'meanRevScore', description: 'Mean reversion signal strength' },
+            ]
+        },
+        {
+            category: 'Market Context (SPY)',
+            features: [
+                { name: 'spyTrend', description: 'SPY above 50 SMA (market uptrend)' },
+                { name: 'spyMomentum', description: 'SPY 20-day momentum (%)' },
+                { name: 'spyVolRegime', description: 'SPY volatility percentile' },
+                { name: 'relativeStrength', description: 'Stock momentum vs SPY momentum' },
+            ]
+        },
+    ];
+
     return (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Score Interpretation</h3>
-            <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                    <thead>
-                        <tr className="bg-gray-50">
-                            <th className="px-4 py-3 text-left font-medium text-gray-600">Range</th>
-                            <th className="px-4 py-3 text-left font-medium text-gray-600">Confidence</th>
-                            <th className="px-4 py-3 text-left font-medium text-gray-600">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                        {probabilityDoc.interpretation.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50">
-                                <td className="px-4 py-3 font-mono font-medium text-gray-800">{row.range}</td>
-                                <td className="px-4 py-3">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                        row.color === 'emerald' ? 'bg-emerald-100 text-emerald-700' :
-                                        row.color === 'amber' ? 'bg-amber-100 text-amber-700' :
-                                        'bg-red-100 text-red-700'
-                                    }`}>
-                                        {row.rating}
-                                    </span>
-                                </td>
-                                <td className="px-4 py-3">
-                                    <span className={`font-medium ${
-                                        row.recommendation.includes('STRONG') ? 'text-emerald-600' :
-                                        row.recommendation.includes('BUY') ? 'text-emerald-500' :
-                                        row.recommendation.includes('HOLD') ? 'text-amber-600' :
-                                        'text-red-600'
-                                    }`}>
-                                        {row.recommendation}
-                                    </span>
-                                </td>
-                            </tr>
+        <div className="space-y-4">
+            {featureCategories.map((cat) => (
+                <div key={cat.category}>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">{cat.category}</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {cat.features.map((f) => (
+                            <div key={f.name} className="flex items-start gap-2 text-sm">
+                                <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 font-mono whitespace-nowrap">
+                                    {f.name}
+                                </code>
+                                <span className="text-gray-600">{f.description}</span>
+                            </div>
                         ))}
-                    </tbody>
-                </table>
-            </div>
+                    </div>
+                </div>
+            ))}
         </div>
     );
 }
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
 
 export function MethodologyTab() {
-    const [expandedCriteria, setExpandedCriteria] = useState<Set<number>>(new Set());
-    const [expandAll, setExpandAll] = useState(false);
-
-    const toggleCriterion = (id: number) => {
-        setExpandedCriteria(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) {
-                next.delete(id);
-            } else {
-                next.add(id);
-            }
-            return next;
-        });
-    };
-
-    const handleExpandAll = () => {
-        if (expandAll) {
-            setExpandedCriteria(new Set());
-        } else {
-            setExpandedCriteria(new Set(criteriaDocumentation.map(c => c.id)));
-        }
-        setExpandAll(!expandAll);
-    };
-
     return (
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             {/* Header */}
-            <div className="text-center mb-8">
-                <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-50 rounded-full text-teal-700 text-sm font-medium mb-4">
-                    <Code className="w-4 h-4" />
-                    v{METHODOLOGY_VERSION} • Updated {LAST_UPDATED}
+            <div className="mb-8">
+                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+                    <span>System Documentation</span>
+                    <span className="text-gray-300">|</span>
+                    <span>v{SYSTEM_METRICS.version}</span>
+                    <span className="text-gray-300">|</span>
+                    <span>Updated {SYSTEM_METRICS.lastUpdated}</span>
                 </div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-3">
-                    How It Works
+                <h1 className="text-2xl font-semibold text-gray-900 mb-2">
+                    How the Veto System Works
                 </h1>
-                <p className="text-gray-600 max-w-2xl mx-auto">
-                    Complete transparency into our 10-Point Swing Analysis System. 
-                    Each criterion uses robust, quantifiable logic derived from proven technical analysis principles.
+                <p className="text-gray-600">
+                    A machine learning-based timing filter for swing trading signals. You provide the stock
+                    picks (from insider buying, politician trades, etc.), and the system evaluates whether
+                    it&apos;s a good time to enter - or vetoes bad timing with high confidence.
                 </p>
             </div>
 
-            {/* SOTA Upgrades Banner */}
-            <div className="bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 rounded-2xl p-6 mb-8 text-white">
-                <div className="flex items-center gap-3 mb-4">
-                    <span className="text-2xl">🚀</span>
-                    <h2 className="text-xl font-bold">SOTA Upgrade: 4-Phase Enhancement</h2>
-                    <span className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-medium">v3.0</span>
-                </div>
-                <p className="text-purple-100 text-sm mb-4">
-                    This system has been upgraded with <strong className="text-white">state-of-the-art (SOTA)</strong> features 
-                    designed to improve win rate by +30% and reduce false signals by 25%.
-                </p>
-                <div className="grid md:grid-cols-4 gap-3">
-                    <div className="bg-white/10 rounded-lg p-3">
-                        <div className="text-purple-200 text-xs mb-1">Phase 1</div>
-                        <div className="font-semibold">Market Regime</div>
-                        <div className="text-xs text-purple-200 mt-1">BULL / CHOPPY / CRASH detection with adaptive entry thresholds</div>
+            {/* Key Concept Banner */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 mb-8">
+                <div className="flex items-start gap-4">
+                    <div className="bg-blue-100 rounded-lg p-2">
+                        <Filter className="w-6 h-6 text-blue-600" />
                     </div>
-                    <div className="bg-white/10 rounded-lg p-3">
-                        <div className="text-purple-200 text-xs mb-1">Phase 2</div>
-                        <div className="font-semibold">Multi-Timeframe</div>
-                        <div className="text-xs text-purple-200 mt-1">4H chart confirmation with MACD + RSI alignment</div>
-                    </div>
-                    <div className="bg-white/10 rounded-lg p-3">
-                        <div className="text-purple-200 text-xs mb-1">Phase 3</div>
-                        <div className="font-semibold">Volume Profile</div>
-                        <div className="text-xs text-purple-200 mt-1">OBV + CMF for smart money detection</div>
-                    </div>
-                    <div className="bg-white/10 rounded-lg p-3">
-                        <div className="text-purple-200 text-xs mb-1">Phase 4</div>
-                        <div className="font-semibold">Divergence</div>
-                        <div className="text-xs text-purple-200 mt-1">RSI/MACD divergence + adaptive thresholds</div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Overview Section */}
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 mb-8 text-white">
-                <h2 className="text-xl font-bold mb-4">📊 The Robust 10-Point System + SOTA Enhancements</h2>
-                <div className="grid md:grid-cols-2 gap-6">
                     <div>
-                        <p className="text-slate-300 text-sm mb-4">
-                            Each stock is evaluated across <strong className="text-white">10 robust criteria</strong> using 
-                            real market data, then <strong className="text-white">filtered through SOTA phases</strong> for 
-                            regime-adjusted, multi-timeframe confirmed signals.
+                        <h2 className="font-semibold text-gray-900 mb-1">The Veto Philosophy</h2>
+                        <p className="text-sm text-gray-700 mb-3">
+                            The system doesn&apos;t try to find winners - <strong>you</strong> find them through your
+                            research (insider buying signals, politician trades, etc.). The ML model&apos;s job is
+                            simpler: <strong>filter out bad timing</strong> with high confidence.
                         </p>
-                        <div className="bg-slate-700/50 rounded-lg p-3 space-y-2">
-                            <div>
-                                <div className="text-xs text-slate-400">Primary Data Source</div>
-                                <div className="text-sm font-medium">Yahoo Finance API + FMP</div>
+                        <div className="flex flex-wrap gap-4 text-sm">
+                            <div className="flex items-center gap-2">
+                                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                                <span className="text-gray-700">Your signal + Good timing = PROCEED</span>
                             </div>
-                            <div>
-                                <div className="text-xs text-slate-400">Market Data</div>
-                                <div className="text-sm font-medium">SPY, VIX, Sector ETFs, 4H Candles</div>
-                            </div>
-                            <div>
-                                <div className="text-xs text-slate-400">Timeframes</div>
-                                <div className="text-sm font-medium">Daily + 4-Hour (MTF)</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="space-y-3">
-                        <div className="text-sm font-medium text-slate-300 mb-2">SOTA Indicators Added:</div>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div className="bg-emerald-600/30 rounded px-2 py-1">🆕 Market Regime</div>
-                            <div className="bg-emerald-600/30 rounded px-2 py-1">🆕 4H MACD/RSI</div>
-                            <div className="bg-emerald-600/30 rounded px-2 py-1">🆕 OBV (On-Balance Vol)</div>
-                            <div className="bg-emerald-600/30 rounded px-2 py-1">🆕 CMF (Money Flow)</div>
-                            <div className="bg-emerald-600/30 rounded px-2 py-1">🆕 RSI Divergence</div>
-                            <div className="bg-emerald-600/30 rounded px-2 py-1">🆕 Adaptive RSI</div>
-                            <div className="bg-slate-700/50 rounded px-2 py-1">✓ SMA/EMA Suite</div>
-                            <div className="bg-slate-700/50 rounded px-2 py-1">✓ Fibonacci Levels</div>
-                        </div>
-                        <div className="mt-4 pt-3 border-t border-slate-600">
-                            <div className="flex items-center gap-3">
-                                <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
-                                <span className="text-sm"><strong>8-10:</strong> Strong pass</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <div className="w-3 h-3 rounded-full bg-amber-400"></div>
-                                <span className="text-sm"><strong>5-7:</strong> Neutral</span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <div className="w-3 h-3 rounded-full bg-red-400"></div>
-                                <span className="text-sm"><strong>1-4:</strong> Fail / Caution</span>
+                            <div className="flex items-center gap-2">
+                                <XCircle className="w-4 h-4 text-red-500" />
+                                <span className="text-gray-700">Your signal + Bad timing = VETO</span>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* SOTA Phase Details */}
-            <div className="grid md:grid-cols-2 gap-4 mb-8">
-                {/* Phase 1: Market Regime */}
-                <div className="bg-white rounded-xl border border-gray-200 p-5">
-                    <div className="flex items-center gap-2 mb-3">
-                        <span className="text-lg">🌊</span>
-                        <h3 className="font-bold text-gray-900">Phase 1: Market Regime Adapter</h3>
-                    </div>
-                    <p className="text-sm text-gray-600 mb-3">
-                        Detects market conditions (BULL/CHOPPY/CRASH) using SPY position vs 50/200 SMAs and VIX levels.
-                        Dynamically adjusts entry thresholds.
-                    </p>
-                    <div className="space-y-2 text-xs">
-                        <div className="flex justify-between p-2 bg-emerald-50 rounded">
-                            <span className="text-emerald-700 font-medium">🟢 BULL</span>
-                            <span className="text-gray-600">Min Score: 6/10 | R:R: 2:1</span>
-                        </div>
-                        <div className="flex justify-between p-2 bg-amber-50 rounded">
-                            <span className="text-amber-700 font-medium">🟡 CHOPPY</span>
-                            <span className="text-gray-600">Min Score: 7.5/10 | R:R: 3:1 | Vol+4H Required</span>
-                        </div>
-                        <div className="flex justify-between p-2 bg-red-50 rounded">
-                            <span className="text-red-700 font-medium">🔴 CRASH</span>
-                            <span className="text-gray-600">Min Score: 9/10 | R:R: 4:1 | Elite Only</span>
-                        </div>
-                    </div>
+            {/* Backtest Performance Summary */}
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                    <Activity className="w-5 h-5 text-gray-600" />
+                    <h2 className="font-medium text-gray-900">Backtest Performance (6 months, 165 insider signals)</h2>
                 </div>
-
-                {/* Phase 2: Multi-Timeframe */}
-                <div className="bg-white rounded-xl border border-gray-200 p-5">
-                    <div className="flex items-center gap-2 mb-3">
-                        <span className="text-lg">📈</span>
-                        <h3 className="font-bold text-gray-900">Phase 2: Multi-Timeframe Confirmation</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <MetricCard
+                        label="Win Rate"
+                        value={SYSTEM_METRICS.backtest.winRate}
+                        change={SYSTEM_METRICS.backtest.winRate - SYSTEM_METRICS.backtest.baselineWinRate}
+                    />
+                    <MetricCard
+                        label="Avg R per Trade"
+                        value={SYSTEM_METRICS.backtest.avgR}
+                        unit="R"
+                    />
+                    <MetricCard
+                        label="Profit Factor"
+                        value={SYSTEM_METRICS.backtest.profitFactor}
+                        unit="x"
+                        change={SYSTEM_METRICS.backtest.profitFactor - SYSTEM_METRICS.backtest.baselineProfitFactor}
+                    />
+                    <MetricCard
+                        label="Veto Precision"
+                        value={SYSTEM_METRICS.backtest.vetoPrecision}
+                    />
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-gray-600">
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <span>Veto Threshold: P(loss) &gt; {SYSTEM_METRICS.threshold}%</span>
                     </div>
-                    <p className="text-sm text-gray-600 mb-3">
-                        Confirms daily signals with 4-hour chart analysis. Requires both timeframes to align for entries.
-                    </p>
-                    <div className="space-y-2 text-xs">
-                        <div className="p-2 bg-gray-50 rounded">
-                            <div className="font-medium text-gray-700 mb-1">4H Analysis Includes:</div>
-                            <div className="flex flex-wrap gap-1">
-                                <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">MACD</span>
-                                <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">RSI</span>
-                                <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">EMA20</span>
-                                <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">Support/Resistance</span>
-                            </div>
-                        </div>
-                        <div className="p-2 bg-gray-50 rounded">
-                            <div className="font-medium text-gray-700 mb-1">Alignment Levels:</div>
-                            <div className="text-gray-600">
-                                STRONG_BUY (D≥7.5 + 4H≥6) → BUY (D≥7 + 4H≥5) → CONSIDER → SKIP
-                            </div>
-                        </div>
-                        <div className="p-2 bg-gray-50 rounded">
-                            <div className="font-medium text-gray-700 mb-1">Combined Score:</div>
-                            <div className="text-gray-600 font-mono">(Daily × 0.6) + (4H × 0.4)</div>
-                        </div>
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                        <span>{SYSTEM_METRICS.featureCount} Technical Features</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                        <span>{SYSTEM_METRICS.backtest.vetoRate}% of signals vetoed</span>
                     </div>
                 </div>
             </div>
 
-            {/* Quick Reference */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6 mb-8">
-                <h3 className="font-semibold text-gray-900 mb-4">Quick Reference: All 10 Criteria</h3>
-                <div className="grid md:grid-cols-2 gap-3">
-                    {criteriaDocumentation.map((c) => (
-                        <div key={c.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50">
-                            <span className="w-6 h-6 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-bold">
-                                {c.id}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                                <div className="font-medium text-gray-900 text-sm">{c.name}</div>
-                                <div className="text-xs text-gray-500 truncate">{c.subtitle}</div>
+            {/* System Flow */}
+            <div className="mb-8">
+                <h2 className="text-lg font-medium text-gray-900 mb-4">How It Works</h2>
+                <div className="grid md:grid-cols-4 gap-4">
+                    {[
+                        { icon: TrendingUp, title: 'You Find Signal', desc: 'Insider buying, politician trade, or other catalyst' },
+                        { icon: Database, title: 'System Analyzes', desc: '40 technical features computed from OHLCV + SPY' },
+                        { icon: Filter, title: 'ML Evaluates Timing', desc: 'Model predicts P(loss) for current conditions' },
+                        { icon: Target, title: 'Trade Plan', desc: 'If not vetoed: Stop loss + 3 profit targets' },
+                    ].map((step, i) => (
+                        <div key={step.title} className="relative">
+                            <div className="bg-white border border-gray-200 rounded-lg p-4 h-full">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <div className="w-6 h-6 rounded bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-600">
+                                        {i + 1}
+                                    </div>
+                                    <step.icon className="w-4 h-4 text-gray-500" />
+                                </div>
+                                <h3 className="font-medium text-gray-900 text-sm mb-1">{step.title}</h3>
+                                <p className="text-xs text-gray-500">{step.desc}</p>
                             </div>
+                            {i < 3 && (
+                                <div className="hidden md:block absolute top-1/2 -right-2 w-4 text-gray-300">
+                                    <ChevronRight className="w-4 h-4" />
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>
             </div>
 
-            {/* Score Calculation Visual */}
-            <div className="grid md:grid-cols-2 gap-6 mb-8">
-                <ScoreDiagram />
-                <InterpretationTable />
-            </div>
+            {/* Detailed Sections */}
+            <div className="space-y-4">
+                {/* Signal Sources */}
+                <ExpandableSection title="Signal Sources (Your Edge)" icon={TrendingUp} defaultOpen>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            The system is designed to work with high-conviction &quot;soft signals&quot; that you discover
+                            through your own research. These signals have informational edge but uncertain timing.
+                        </p>
 
-            {/* Criteria List */}
-            <div className="mb-6 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900">Detailed Criteria Documentation</h2>
-                <button
-                    onClick={handleExpandAll}
-                    className="text-sm text-teal-600 hover:text-teal-700 font-medium"
-                >
-                    {expandAll ? 'Collapse All' : 'Expand All'}
-                </button>
-            </div>
-            
-            <div className="space-y-3">
-                {criteriaDocumentation.map(criterion => (
-                    <CriterionCard
-                        key={criterion.id}
-                        criterion={criterion}
-                        isExpanded={expandedCriteria.has(criterion.id)}
-                        onToggle={() => toggleCriterion(criterion.id)}
-                    />
-                ))}
+                        <div className="grid md:grid-cols-3 gap-4">
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2 flex items-center gap-2">
+                                    <DollarSign className="w-4 h-4 text-emerald-500" />
+                                    Insider Buying
+                                </h4>
+                                <p className="text-xs text-gray-600">
+                                    Corporate insiders (CEOs, directors) buying their own stock.
+                                    They know the business best.
+                                </p>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2 flex items-center gap-2">
+                                    <Activity className="w-4 h-4 text-blue-500" />
+                                    Politician Trades
+                                </h4>
+                                <p className="text-xs text-gray-600">
+                                    Congressional trading disclosures. Often have advance knowledge
+                                    of legislation and contracts.
+                                </p>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2 flex items-center gap-2">
+                                    <BarChart2 className="w-4 h-4 text-amber-500" />
+                                    Smart Money
+                                </h4>
+                                <p className="text-xs text-gray-600">
+                                    Hedge fund 13F filings, unusual options activity, or
+                                    institutional accumulation patterns.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <div className="flex items-start gap-2">
+                                <Info className="w-4 h-4 text-blue-600 mt-0.5" />
+                                <div className="text-sm text-blue-800">
+                                    <strong>Why this approach?</strong> These signals have proven alpha but
+                                    uncertain timing. The ML veto filters out entries when technical
+                                    conditions suggest the trade is likely to fail despite the signal.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </ExpandableSection>
+
+                {/* Feature Engineering */}
+                <ExpandableSection title={`Technical Features (${SYSTEM_METRICS.featureCount} Features)`} icon={Layers}>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            The system computes {SYSTEM_METRICS.featureCount} technical features from OHLCV price data
+                            and SPY market context. All features are &quot;point-in-time safe&quot; - computed using only
+                            data available at the decision timestamp (no lookahead bias).
+                        </p>
+                        <FeatureTable />
+                    </div>
+                </ExpandableSection>
+
+                {/* ML Model */}
+                <ExpandableSection title="The Veto Model" icon={Cpu}>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            A logistic regression model predicts the probability that a trade will result in a loss.
+                            If P(loss) exceeds the veto threshold, the signal is rejected.
+                        </p>
+
+                        <div className="grid md:grid-cols-2 gap-4">
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2">Model Architecture</h4>
+                                <table className="text-sm w-full">
+                                    <tbody className="divide-y divide-gray-200">
+                                        <tr>
+                                            <td className="py-1.5 text-gray-500">Algorithm</td>
+                                            <td className="py-1.5 text-gray-900 font-mono text-xs">Logistic Regression</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-1.5 text-gray-500">Features</td>
+                                            <td className="py-1.5 text-gray-900 font-mono text-xs">{SYSTEM_METRICS.featureCount} (OHLCV + SPY)</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-1.5 text-gray-500">Training Samples</td>
+                                            <td className="py-1.5 text-gray-900 font-mono text-xs">{SYSTEM_METRICS.trainingSamples.toLocaleString()}</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-1.5 text-gray-500">Normalization</td>
+                                            <td className="py-1.5 text-gray-900 font-mono text-xs">Z-score standardization</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-1.5 text-gray-500">Veto Threshold</td>
+                                            <td className="py-1.5 text-gray-900 font-mono text-xs">P(loss) &gt; {SYSTEM_METRICS.threshold}%</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2">Why Logistic Regression?</h4>
+                                <ul className="text-sm text-gray-600 space-y-1.5">
+                                    <li className="flex items-start gap-2">
+                                        <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5" />
+                                        <span>Well-calibrated probabilities (crucial for thresholding)</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5" />
+                                        <span>Interpretable feature weights</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5" />
+                                        <span>Robust to overfitting with limited signal</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5" />
+                                        <span>Fast inference (runs in browser)</span>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <h4 className="font-medium text-gray-900 text-sm mb-2">Prediction Output</h4>
+                            <p className="text-sm text-gray-600 mb-2">
+                                The model outputs P(win), and we compute P(loss) = 1 - P(win). If P(loss) exceeds
+                                the threshold, the trade is vetoed.
+                            </p>
+                            <div className="font-mono text-xs bg-gray-900 text-gray-100 p-3 rounded">
+                                P(win) = sigmoid(w₀ + w₁·x₁ + w₂·x₂ + ... + w₄₀·x₄₀)<br/>
+                                P(loss) = 1 - P(win)<br/>
+                                VETO if P(loss) &gt; {SYSTEM_METRICS.threshold}%
+                            </div>
+                        </div>
+                    </div>
+                </ExpandableSection>
+
+                {/* Veto Decision Logic */}
+                <ExpandableSection title="Veto Decision Logic" icon={Shield}>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            The veto threshold was optimized via grid search to maximize timing value while
+                            maintaining high veto precision.
+                        </p>
+
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <h4 className="font-medium text-gray-900 text-sm mb-3">Decision Outcomes</h4>
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-3 text-sm">
+                                    <div className="w-24 font-medium text-gray-600">P(loss) &lt; 50%</div>
+                                    <div className="flex-1 h-2 bg-emerald-500 rounded"></div>
+                                    <div className="w-20 text-emerald-700 font-medium">PROCEED</div>
+                                </div>
+                                <div className="flex items-center gap-3 text-sm">
+                                    <div className="w-24 font-medium text-gray-600">50-60%</div>
+                                    <div className="flex-1 h-2 bg-amber-400 rounded"></div>
+                                    <div className="w-20 text-amber-700 font-medium">CAUTION</div>
+                                </div>
+                                <div className="flex items-center gap-3 text-sm">
+                                    <div className="w-24 font-medium text-gray-600">&gt; 60%</div>
+                                    <div className="flex-1 h-2 bg-red-500 rounded"></div>
+                                    <div className="w-20 text-red-700 font-medium">VETO</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid md:grid-cols-3 gap-4">
+                            <div className="text-center p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                                <div className="text-2xl font-semibold text-emerald-700">
+                                    {SYSTEM_METRICS.backtest.vetoPrecision}%
+                                </div>
+                                <div className="text-xs text-gray-600 mt-1">Veto Precision</div>
+                                <div className="text-xs text-emerald-600 mt-0.5">
+                                    Vetoed trades usually lose
+                                </div>
+                            </div>
+                            <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
+                                <div className="text-2xl font-semibold text-blue-700">
+                                    {SYSTEM_METRICS.backtest.vetoRate}%
+                                </div>
+                                <div className="text-xs text-gray-600 mt-1">Veto Rate</div>
+                                <div className="text-xs text-blue-600 mt-0.5">
+                                    Low false positive rate
+                                </div>
+                            </div>
+                            <div className="text-center p-4 bg-amber-50 rounded-lg border border-amber-200">
+                                <div className="text-2xl font-semibold text-amber-700">
+                                    +{(SYSTEM_METRICS.backtest.winRate - SYSTEM_METRICS.backtest.baselineWinRate).toFixed(1)}%
+                                </div>
+                                <div className="text-xs text-gray-600 mt-1">Win Rate Lift</div>
+                                <div className="text-xs text-amber-600 mt-0.5">
+                                    vs taking all signals
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5" />
+                                <div className="text-sm text-amber-800">
+                                    <strong>Conservative by design:</strong> The system vetoes only ~7% of signals.
+                                    It&apos;s not trying to predict winners - it&apos;s catching the worst timing with
+                                    high confidence.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </ExpandableSection>
+
+                {/* Trade Plan Generation */}
+                <ExpandableSection title="Trade Plan Generation" icon={Target}>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            For signals that pass the veto filter, the system generates a complete trade plan
+                            with stop loss and three profit targets.
+                        </p>
+
+                        <div className="grid md:grid-cols-2 gap-4">
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2">Stop Loss Calculation</h4>
+                                <ul className="text-sm text-gray-600 space-y-1.5">
+                                    <li><strong>Method:</strong> ATR-based stop</li>
+                                    <li><strong>Formula:</strong> Entry - 1.5 × ATR(14)</li>
+                                    <li><strong>Typical distance:</strong> 3-5% below entry</li>
+                                    <li><strong>Purpose:</strong> Defines 1R risk unit</li>
+                                </ul>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2">Profit Targets (Partial Exits)</h4>
+                                <table className="text-sm w-full">
+                                    <tbody className="divide-y divide-gray-200">
+                                        <tr>
+                                            <td className="py-1.5 text-gray-500">TP1 (33%)</td>
+                                            <td className="py-1.5 text-gray-900">Entry + 2R</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-1.5 text-gray-500">TP2 (33%)</td>
+                                            <td className="py-1.5 text-gray-900">Entry + 3R</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="py-1.5 text-gray-500">TP3 (34%)</td>
+                                            <td className="py-1.5 text-gray-900">Entry + 4R</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <h4 className="font-medium text-gray-900 text-sm mb-2">Position Sizing</h4>
+                            <p className="text-sm text-gray-600 mb-2">
+                                With 1% account risk per trade:
+                            </p>
+                            <div className="font-mono text-xs bg-gray-900 text-gray-100 p-3 rounded">
+                                Risk per share = Entry - Stop Loss<br/>
+                                Position size = (Account × 1%) / Risk per share<br/>
+                                <br/>
+                                Example: $100,000 account, $50 entry, $47 stop<br/>
+                                Risk/share = $3, Position = $1,000 / $3 = 333 shares
+                            </div>
+                        </div>
+                    </div>
+                </ExpandableSection>
+
+                {/* Expected Returns */}
+                <ExpandableSection title="Expected Performance" icon={BarChart2}>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            Based on backtesting with {SYSTEM_METRICS.backtest.totalSignals} insider signals
+                            over 6 months, here are the expected returns:
+                        </p>
+
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <h4 className="font-medium text-gray-900 text-sm mb-3">Annual Return Projections</h4>
+                            <table className="text-sm w-full">
+                                <thead className="border-b border-gray-200">
+                                    <tr>
+                                        <th className="py-2 text-left text-gray-500">Risk/Trade</th>
+                                        <th className="py-2 text-left text-gray-500">Trades/Year</th>
+                                        <th className="py-2 text-left text-gray-500">Expected Return</th>
+                                        <th className="py-2 text-left text-gray-500">$100K Becomes</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    <tr>
+                                        <td className="py-2 text-gray-700">0.5%</td>
+                                        <td className="py-2 text-gray-700">~300</td>
+                                        <td className="py-2 text-emerald-600 font-medium">~40%</td>
+                                        <td className="py-2 text-gray-900 font-semibold">$140,000</td>
+                                    </tr>
+                                    <tr className="bg-blue-50">
+                                        <td className="py-2 text-gray-700">1.0%</td>
+                                        <td className="py-2 text-gray-700">~300</td>
+                                        <td className="py-2 text-emerald-600 font-medium">~80%</td>
+                                        <td className="py-2 text-gray-900 font-semibold">$180,000</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-2 text-gray-700">1.5%</td>
+                                        <td className="py-2 text-gray-700">~300</td>
+                                        <td className="py-2 text-emerald-600 font-medium">~120%</td>
+                                        <td className="py-2 text-gray-900 font-semibold">$220,000</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="grid md:grid-cols-2 gap-4">
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                                <h4 className="font-medium text-emerald-800 text-sm mb-1">Key Advantage</h4>
+                                <p className="text-sm text-emerald-700">
+                                    Profit Factor of {SYSTEM_METRICS.backtest.profitFactor.toFixed(2)} means
+                                    you make ${(SYSTEM_METRICS.backtest.profitFactor).toFixed(2)} for every
+                                    $1 lost. Sustainable edge over time.
+                                </p>
+                            </div>
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                <h4 className="font-medium text-amber-800 text-sm mb-1">Risk Warning</h4>
+                                <p className="text-sm text-amber-700">
+                                    Past backtest performance does not guarantee future results.
+                                    Markets change, and edge can decay.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </ExpandableSection>
+
+                {/* Model Updates */}
+                <ExpandableSection title="Model Maintenance" icon={GitBranch}>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            The model is periodically retrained and the veto threshold re-optimized
+                            as market conditions evolve.
+                        </p>
+
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <h4 className="font-medium text-gray-900 text-sm mb-2">Update Schedule</h4>
+                            <table className="text-sm w-full">
+                                <tbody className="divide-y divide-gray-200">
+                                    <tr>
+                                        <td className="py-1.5 text-gray-500">Training Data</td>
+                                        <td className="py-1.5 text-gray-900">7 years of daily OHLCV (2018-2025)</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-1.5 text-gray-500">Model Retraining</td>
+                                        <td className="py-1.5 text-gray-900">Quarterly with new market data</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-1.5 text-gray-500">Threshold Optimization</td>
+                                        <td className="py-1.5 text-gray-900">Monthly grid search validation</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-1.5 text-gray-500">Performance Monitoring</td>
+                                        <td className="py-1.5 text-gray-900">Continuous veto precision tracking</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </ExpandableSection>
             </div>
 
             {/* Disclaimer */}
-            <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                <h3 className="font-semibold text-amber-800 mb-2 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4" /> Important Disclaimers
+            <div className="mt-8 p-4 bg-gray-100 border border-gray-200 rounded-lg">
+                <h3 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-gray-600" />
+                    Important Disclaimers
                 </h3>
-                <ul className="text-sm text-amber-700 space-y-1">
-                    <li>• This tool is for <strong>educational purposes only</strong> and does not constitute financial advice.</li>
-                    <li>• Past performance does not guarantee future results.</li>
-                    <li>• Some criteria have limitations (marked) due to free API constraints.</li>
-                    <li>• Full fundamental data requires premium API subscriptions.</li>
-                    <li>• Always conduct your own research before making investment decisions.</li>
+                <ul className="text-sm text-gray-600 space-y-1">
+                    <li>This tool is for educational and informational purposes only.</li>
+                    <li>Past backtest performance does not guarantee future results.</li>
+                    <li>Always conduct your own research before making investment decisions.</li>
+                    <li>The model is trained on historical data and may not perform in novel market conditions.</li>
+                    <li>You are responsible for your own trades. This is not financial advice.</li>
                 </ul>
             </div>
 
             {/* Footer */}
             <div className="mt-6 text-center text-xs text-gray-400">
-                Documentation derived from <code className="bg-gray-100 px-1.5 py-0.5 rounded">src/lib/analysis.ts</code>
-                <br />
-                This system implements robust swing trading criteria based on institutional trading principles.
+                Veto System v{SYSTEM_METRICS.version} | {SYSTEM_METRICS.featureCount} features |
+                Threshold: P(loss) &gt; {SYSTEM_METRICS.threshold}% | Updated {SYSTEM_METRICS.lastUpdated}
             </div>
         </div>
     );
