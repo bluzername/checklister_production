@@ -9,6 +9,7 @@ import {
   markCacheRefreshing,
   invalidateCache
 } from '@/lib/portfolio/cache';
+import { logPortfolioOperation, updateActivityOutcome } from '@/lib/activity-logger';
 
 export type SellPriceLevel = 'stop_loss' | 'pt1' | 'pt2' | 'pt3';
 
@@ -51,7 +52,7 @@ export async function addPosition(
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-        
+
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
@@ -76,6 +77,31 @@ export async function addPosition(
         // Invalidate cache when position is added
         invalidateCache(user.id);
 
+        // Log the ADD_POSITION operation with full context
+        // Fetch current analysis to capture algorithm state at time of entry
+        let analysis: AnalysisResult | null = null;
+        try {
+            analysis = await analyzeTicker(ticker.toUpperCase());
+        } catch {
+            // Analysis failed, but we still log the operation
+            console.log(`[Portfolio] Could not fetch analysis for ${ticker} during logging`);
+        }
+
+        // Fire-and-forget logging (non-blocking)
+        logPortfolioOperation(
+            user.id,
+            'ADD_POSITION',
+            ticker.toUpperCase(),
+            {
+                position_id: data.id,
+                buy_price: buyPrice,
+                quantity: quantity,
+                notes: notes,
+            },
+            analysis,
+            analysis?.recommendation
+        ).catch(err => console.error('[Portfolio] Logging error:', err));
+
         return { success: true, data: data as PortfolioPosition };
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -88,11 +114,19 @@ export async function deletePosition(id: string): Promise<{ success: boolean; er
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-        
+
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
         }
+
+        // Fetch position details before deletion for logging
+        const { data: position } = await supabase
+            .from('portfolios')
+            .select('*')
+            .eq('id', id)
+            .eq('user_id', user.id)
+            .single();
 
         const { error } = await supabase
             .from('portfolios')
@@ -106,6 +140,53 @@ export async function deletePosition(id: string): Promise<{ success: boolean; er
 
         // Invalidate cache when position is deleted
         invalidateCache(user.id);
+
+        // Log the DELETE_POSITION operation with outcome tracking
+        if (position) {
+            let analysis: AnalysisResult | null = null;
+            try {
+                analysis = await analyzeTicker(position.ticker);
+            } catch {
+                // Analysis failed, continue with logging
+            }
+
+            // Calculate realized P/L for outcome tracking
+            const currentPrice = analysis?.current_price;
+            let realizedPnl: number | undefined;
+            let realizedPnlPercent: number | undefined;
+            let outcomeStatus: 'WIN' | 'LOSS' | 'CANCELLED' = 'CANCELLED';
+
+            if (currentPrice && position.buy_price) {
+                realizedPnl = (currentPrice - position.buy_price) * position.quantity;
+                realizedPnlPercent = ((currentPrice - position.buy_price) / position.buy_price) * 100;
+                outcomeStatus = realizedPnl >= 0 ? 'WIN' : 'LOSS';
+            }
+
+            // Log the deletion
+            logPortfolioOperation(
+                user.id,
+                'DELETE_POSITION',
+                position.ticker,
+                {
+                    position_id: id,
+                    buy_price: position.buy_price,
+                    quantity: position.quantity,
+                    notes: `Deleted with P/L: ${realizedPnlPercent?.toFixed(2) ?? 'N/A'}%`,
+                },
+                analysis
+            ).catch(err => console.error('[Portfolio] Logging error:', err));
+
+            // Update the original ADD_POSITION entry with outcome
+            if (currentPrice) {
+                updateActivityOutcome(id, {
+                    outcome_price: currentPrice,
+                    outcome_date: new Date(),
+                    realized_pnl: realizedPnl ?? 0,
+                    realized_pnl_percent: realizedPnlPercent ?? 0,
+                    outcome_status: outcomeStatus,
+                }).catch(err => console.error('[Portfolio] Outcome update error:', err));
+            }
+        }
 
         return { success: true };
     } catch (error) {
@@ -187,6 +268,34 @@ export async function recordSellAtPrice(
 
         // Invalidate cache when sells are recorded
         invalidateCache(user.id);
+
+        // Log the RECORD_SELL operation with full context
+        let analysis: AnalysisResult | null = null;
+        try {
+            analysis = await analyzeTicker(position.ticker);
+        } catch {
+            // Analysis failed, continue with logging
+        }
+
+        // Calculate P/L for this specific sell
+        const sellPnl = (sellPrice - position.buy_price) * sharesSold;
+        const sellPnlPercent = ((sellPrice - position.buy_price) / position.buy_price) * 100;
+
+        logPortfolioOperation(
+            user.id,
+            'RECORD_SELL',
+            position.ticker,
+            {
+                position_id: positionId,
+                buy_price: position.buy_price,
+                quantity: position.quantity,
+                sell_price: sellPrice,
+                shares_sold: sharesSold,
+                price_level: priceLevel,
+                notes: `Sold ${sharesSold} shares at ${priceLevel.toUpperCase()} for $${sellPrice} (P/L: ${sellPnlPercent.toFixed(2)}%)`,
+            },
+            analysis
+        ).catch(err => console.error('[Portfolio] Logging error:', err));
 
         return { success: true };
     } catch (error) {
