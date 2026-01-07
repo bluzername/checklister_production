@@ -12,6 +12,34 @@ import {
 
 export type SellPriceLevel = 'stop_loss' | 'pt1' | 'pt2' | 'pt3';
 
+// Batch size for parallel processing - limits concurrent API calls to avoid rate limiting
+const ANALYSIS_BATCH_SIZE = 10;
+
+/**
+ * Process items in batches to avoid rate limiting while maintaining good performance.
+ * Processes BATCH_SIZE items in parallel, then waits before the next batch.
+ */
+async function processInBatches<T, R>(
+    items: T[],
+    processor: (item: T) => Promise<R>,
+    batchSize: number = ANALYSIS_BATCH_SIZE
+): Promise<R[]> {
+    const results: R[] = [];
+
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        const batchResults = await Promise.all(batch.map(processor));
+        results.push(...batchResults);
+
+        // Small delay between batches to avoid rate limiting
+        if (i + batchSize < items.length) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+    }
+
+    return results;
+}
+
 export async function getPortfolio(): Promise<{ success: boolean; data?: PortfolioPosition[]; error?: string }> {
     try {
         if (!isSupabaseConfigured()) {
@@ -284,9 +312,10 @@ export async function analyzePortfolio(): Promise<{
             return { success: true, data: [] };
         }
 
-        // Analyze each position
-        const analyzedPositions: PortfolioPosition[] = await Promise.all(
-            positions.map(async (position) => {
+        // Analyze positions in batches to avoid rate limiting while maintaining performance
+        const analyzedPositions = await processInBatches(
+            positions,
+            async (position) => {
                 try {
                     const analysis = await analyzeTicker(position.ticker);
                     const action = computeAction(position as PortfolioPosition, analysis);
@@ -295,7 +324,7 @@ export async function analyzePortfolio(): Promise<{
 
                     // Calculate remaining shares
                     const sells: PositionSells = position.sells || {};
-                    const totalSold = 
+                    const totalSold =
                         (sells.stop_loss?.shares_sold || 0) +
                         (sells.pt1?.shares_sold || 0) +
                         (sells.pt2?.shares_sold || 0) +
@@ -314,7 +343,7 @@ export async function analyzePortfolio(): Promise<{
                 } catch {
                     // If analysis fails, return position without analysis
                     const sells: PositionSells = position.sells || {};
-                    const totalSold = 
+                    const totalSold =
                         (sells.stop_loss?.shares_sold || 0) +
                         (sells.pt1?.shares_sold || 0) +
                         (sells.pt2?.shares_sold || 0) +
@@ -324,7 +353,7 @@ export async function analyzePortfolio(): Promise<{
                         remaining_shares: position.quantity - totalSold,
                     } as PortfolioPosition;
                 }
-            })
+            }
         );
 
         return { success: true, data: analyzedPositions };
@@ -447,9 +476,10 @@ export async function analyzePortfolioCached(forceRefresh = false): Promise<{
         markCacheRefreshing(user.id, true);
 
         try {
-            // Analyze each position (the slow part)
-            const analyzedPositions: PortfolioPosition[] = await Promise.all(
-                rawPositions.map(async (position) => {
+            // Analyze positions in batches to avoid rate limiting while maintaining performance
+            const analyzedPositions = await processInBatches(
+                rawPositions,
+                async (position) => {
                     try {
                         const analysis = await analyzeTicker(position.ticker);
                         const action = computeAction(position as PortfolioPosition, analysis);
@@ -487,7 +517,7 @@ export async function analyzePortfolioCached(forceRefresh = false): Promise<{
                             remaining_shares: position.quantity - totalSold,
                         } as PortfolioPosition;
                     }
-                })
+                }
             );
 
             // Update cache

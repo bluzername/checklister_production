@@ -4,6 +4,34 @@ import { createClient, isSupabaseConfigured } from '@/lib/supabase/server';
 import { analyzeTicker } from '@/lib/analysis';
 import { WatchlistItem, AnalysisResult } from '@/lib/types';
 
+// Batch size for parallel processing - limits concurrent API calls to avoid rate limiting
+const ANALYSIS_BATCH_SIZE = 10;
+
+/**
+ * Process items in batches to avoid rate limiting while maintaining good performance.
+ * Processes BATCH_SIZE items in parallel, then waits before the next batch.
+ */
+async function processInBatches<T, R>(
+    items: T[],
+    processor: (item: T) => Promise<R>,
+    batchSize: number = ANALYSIS_BATCH_SIZE
+): Promise<R[]> {
+    const results: R[] = [];
+
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        const batchResults = await Promise.all(batch.map(processor));
+        results.push(...batchResults);
+
+        // Small delay between batches to avoid rate limiting
+        if (i + batchSize < items.length) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+    }
+
+    return results;
+}
+
 export async function getWatchlist(): Promise<{ success: boolean; data?: WatchlistItem[]; error?: string }> {
     try {
         if (!isSupabaseConfigured()) {
@@ -144,12 +172,13 @@ export async function analyzeWatchlist(): Promise<{
             return { success: true, data: [] };
         }
 
-        // Analyze each watchlist item
-        const analyzedItems: WatchlistItem[] = await Promise.all(
-            items.map(async (item) => {
+        // Analyze watchlist items in batches to avoid rate limiting while maintaining performance
+        const analyzedItems = await processInBatches(
+            items,
+            async (item) => {
                 try {
                     const analysis = await analyzeTicker(item.ticker);
-                    
+
                     return {
                         ...item,
                         current_price: analysis.current_price,
@@ -161,7 +190,7 @@ export async function analyzeWatchlist(): Promise<{
                     // If analysis fails, return item without analysis
                     return item as WatchlistItem;
                 }
-            })
+            }
         );
 
         return { success: true, data: analyzedItems };
