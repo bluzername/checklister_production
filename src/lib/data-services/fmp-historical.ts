@@ -2,11 +2,14 @@
  * Financial Modeling Prep (FMP) Historical Data Service
  * Provides historical price data with proper rate limiting
  * Rate limit: 300 calls per minute (5 calls/second)
+ *
+ * Updated 2026-01-07: Migrated from legacy v3 API to stable API
+ * Legacy endpoints deprecated as of August 31, 2025
  */
 
 import { cacheKey, getOrFetch, TTL } from './cache';
 
-const FMP_BASE_URL = 'https://financialmodelingprep.com/api/v3';
+const FMP_BASE_URL = 'https://financialmodelingprep.com/stable';
 
 // ============================================
 // RATE LIMITER - 300 calls/minute
@@ -146,8 +149,25 @@ export function isFmpHistoricalConfigured(): boolean {
 }
 
 /**
+ * Stable API EOD response type
+ */
+interface FmpStableEodData {
+  symbol: string;
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  change: number;
+  changePercent: number;
+  vwap: number;
+}
+
+/**
  * Fetch historical daily prices for a ticker
  * Returns data in reverse chronological order (newest first)
+ * Uses stable API endpoint: /stable/historical-price-eod/full
  */
 export async function fetchHistoricalPrices(
   ticker: string,
@@ -159,8 +179,8 @@ export async function fetchHistoricalPrices(
   // Apply rate limiting
   await rateLimiter.throttle();
 
-  // Build URL with optional date range
-  let url = `${FMP_BASE_URL}/historical-price-full/${ticker}?apikey=${apiKey}`;
+  // Build URL with new stable API format
+  let url = `${FMP_BASE_URL}/historical-price-eod/full?symbol=${ticker}&apikey=${apiKey}`;
 
   if (fromDate) {
     url += `&from=${fromDate.toISOString().split('T')[0]}`;
@@ -181,9 +201,9 @@ export async function fetchHistoricalPrices(
       throw new Error(`FMP historical error: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data: FmpStableEodData[] = await response.json();
 
-    if (!data || !data.historical || data.historical.length === 0) {
+    if (!Array.isArray(data) || data.length === 0) {
       return {
         dates: [],
         prices: [],
@@ -195,10 +215,23 @@ export async function fetchHistoricalPrices(
       };
     }
 
-    const quotes: FmpHistoricalQuote[] = data.historical;
-
-    // Sort by date descending (newest first) for consistency with Yahoo Finance
-    quotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Stable API returns data in descending order (newest first) - already sorted
+    // Convert to FmpHistoricalQuote format for backwards compatibility
+    const quotes: FmpHistoricalQuote[] = data.map(d => ({
+      date: d.date,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      adjClose: d.close, // Stable API doesn't separate adj close
+      volume: d.volume,
+      unadjustedVolume: d.volume,
+      change: d.change,
+      changePercent: d.changePercent,
+      vwap: d.vwap,
+      label: d.date,
+      changeOverTime: 0,
+    }));
 
     return {
       dates: quotes.map(q => q.date),
@@ -238,7 +271,31 @@ export async function getHistoricalPrices(
 }
 
 /**
+ * Stable API quote response type
+ */
+interface FmpStableQuote {
+  symbol: string;
+  name: string;
+  price: number;
+  changePercentage: number;
+  change: number;
+  volume: number;
+  dayLow: number;
+  dayHigh: number;
+  yearHigh: number;
+  yearLow: number;
+  marketCap: number;
+  priceAvg50: number;
+  priceAvg200: number;
+  exchange: string;
+  open: number;
+  previousClose: number;
+  timestamp: number;
+}
+
+/**
  * Fetch current quote for a ticker
+ * Uses stable API endpoint: /stable/quote?symbol=
  */
 export async function fetchQuote(ticker: string): Promise<FmpQuote | null> {
   const apiKey = getApiKey();
@@ -246,7 +303,7 @@ export async function fetchQuote(ticker: string): Promise<FmpQuote | null> {
   // Apply rate limiting
   await rateLimiter.throttle();
 
-  const url = `${FMP_BASE_URL}/quote/${ticker}?apikey=${apiKey}`;
+  const url = `${FMP_BASE_URL}/quote?symbol=${ticker}&apikey=${apiKey}`;
 
   try {
     const response = await fetch(url);
@@ -260,13 +317,38 @@ export async function fetchQuote(ticker: string): Promise<FmpQuote | null> {
       throw new Error(`FMP quote error: ${response.status}`);
     }
 
-    const data: FmpQuote[] = await response.json();
+    const data: FmpStableQuote[] = await response.json();
 
     if (!Array.isArray(data) || data.length === 0) {
       return null;
     }
 
-    return data[0];
+    // Convert stable API response to FmpQuote format for backwards compatibility
+    const q = data[0];
+    return {
+      symbol: q.symbol,
+      name: q.name,
+      price: q.price,
+      changesPercentage: q.changePercentage,
+      change: q.change,
+      dayLow: q.dayLow,
+      dayHigh: q.dayHigh,
+      yearHigh: q.yearHigh,
+      yearLow: q.yearLow,
+      marketCap: q.marketCap,
+      priceAvg50: q.priceAvg50,
+      priceAvg200: q.priceAvg200,
+      exchange: q.exchange,
+      volume: q.volume,
+      avgVolume: q.volume, // Stable API doesn't have avgVolume, use volume as fallback
+      open: q.open,
+      previousClose: q.previousClose,
+      eps: 0, // Not in stable quote response
+      pe: 0, // Not in stable quote response
+      earningsAnnouncement: '',
+      sharesOutstanding: 0,
+      timestamp: q.timestamp,
+    };
   } catch (error) {
     console.error(`[FMP] Error fetching quote for ${ticker}:`, error);
     throw error;
@@ -275,6 +357,7 @@ export async function fetchQuote(ticker: string): Promise<FmpQuote | null> {
 
 /**
  * Fetch quotes for multiple tickers (more efficient)
+ * Uses stable API endpoint: /stable/quote?symbol=AAPL,MSFT,...
  */
 export async function fetchBatchQuotes(tickers: string[]): Promise<Map<string, FmpQuote>> {
   const apiKey = getApiKey();
@@ -283,7 +366,7 @@ export async function fetchBatchQuotes(tickers: string[]): Promise<Map<string, F
   await rateLimiter.throttle();
 
   const tickerList = tickers.join(',');
-  const url = `${FMP_BASE_URL}/quote/${tickerList}?apikey=${apiKey}`;
+  const url = `${FMP_BASE_URL}/quote?symbol=${tickerList}&apikey=${apiKey}`;
 
   try {
     const response = await fetch(url);
@@ -297,12 +380,36 @@ export async function fetchBatchQuotes(tickers: string[]): Promise<Map<string, F
       throw new Error(`FMP batch quote error: ${response.status}`);
     }
 
-    const data: FmpQuote[] = await response.json();
+    const data: FmpStableQuote[] = await response.json();
     const result = new Map<string, FmpQuote>();
 
     if (Array.isArray(data)) {
-      for (const quote of data) {
-        result.set(quote.symbol, quote);
+      for (const q of data) {
+        // Convert stable API response to FmpQuote format
+        result.set(q.symbol, {
+          symbol: q.symbol,
+          name: q.name,
+          price: q.price,
+          changesPercentage: q.changePercentage,
+          change: q.change,
+          dayLow: q.dayLow,
+          dayHigh: q.dayHigh,
+          yearHigh: q.yearHigh,
+          yearLow: q.yearLow,
+          marketCap: q.marketCap,
+          priceAvg50: q.priceAvg50,
+          priceAvg200: q.priceAvg200,
+          exchange: q.exchange,
+          volume: q.volume,
+          avgVolume: q.volume,
+          open: q.open,
+          previousClose: q.previousClose,
+          eps: 0,
+          pe: 0,
+          earningsAnnouncement: '',
+          sharesOutstanding: 0,
+          timestamp: q.timestamp,
+        });
       }
     }
 
