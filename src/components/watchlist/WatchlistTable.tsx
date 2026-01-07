@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { Loader2, RefreshCw, Eye, Sparkles } from 'lucide-react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { Loader2, RefreshCw, Eye, Sparkles, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { WatchlistItem } from '@/lib/types';
 import { analyzeWatchlist } from '@/app/watchlist-actions';
 import { AddWatchlistForm } from './AddWatchlistForm';
 import { WatchlistRow } from './WatchlistRow';
+
+type SortColumn = 'ticker' | 'price' | 'score' | 'signal' | 'date_added';
+type SortDirection = 'asc' | 'desc';
 
 interface WatchlistTableProps {
     onSelectItem: (item: WatchlistItem) => void;
@@ -16,6 +19,60 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [sortColumn, setSortColumn] = useState<SortColumn>('date_added');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+    // Handle column header click for sorting
+    const handleSort = (column: SortColumn) => {
+        if (sortColumn === column) {
+            // Toggle direction if same column
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            // New column, default to descending for numbers/dates, ascending for text
+            setSortColumn(column);
+            setSortDirection(column === 'ticker' ? 'asc' : 'desc');
+        }
+    };
+
+    // Sort items based on current sort state
+    const sortedItems = useMemo(() => {
+        const sorted = [...items].sort((a, b) => {
+            let comparison = 0;
+
+            switch (sortColumn) {
+                case 'ticker':
+                    comparison = a.ticker.localeCompare(b.ticker);
+                    break;
+                case 'price':
+                    comparison = (a.current_price || 0) - (b.current_price || 0);
+                    break;
+                case 'score':
+                    comparison = (a.score || 0) - (b.score || 0);
+                    break;
+                case 'signal':
+                    // Sort by is_good_entry (true first when desc)
+                    comparison = (a.is_good_entry ? 1 : 0) - (b.is_good_entry ? 1 : 0);
+                    break;
+                case 'date_added':
+                    comparison = new Date(a.date_added).getTime() - new Date(b.date_added).getTime();
+                    break;
+            }
+
+            return sortDirection === 'asc' ? comparison : -comparison;
+        });
+
+        return sorted;
+    }, [items, sortColumn, sortDirection]);
+
+    // Render sort icon for column header
+    const SortIcon = ({ column }: { column: SortColumn }) => {
+        if (sortColumn !== column) {
+            return <ChevronsUpDown className="w-3 h-3 text-gray-400" />;
+        }
+        return sortDirection === 'asc'
+            ? <ChevronUp className="w-3 h-3 text-teal-600" />
+            : <ChevronDown className="w-3 h-3 text-teal-600" />;
+    };
 
     const loadWatchlist = useCallback(async (showRefresh = false) => {
         if (showRefresh) setRefreshing(true);
@@ -102,26 +159,56 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
                     <table className="w-full">
                         <thead className="bg-gray-50 border-b border-gray-200">
                             <tr>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                                    Ticker
+                                <th
+                                    className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                    onClick={() => handleSort('ticker')}
+                                >
+                                    <div className="flex items-center gap-1">
+                                        Ticker
+                                        <SortIcon column="ticker" />
+                                    </div>
                                 </th>
-                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                                    Price
+                                <th
+                                    className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                    onClick={() => handleSort('price')}
+                                >
+                                    <div className="flex items-center justify-end gap-1">
+                                        Price
+                                        <SortIcon column="price" />
+                                    </div>
                                 </th>
-                                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                                    Score
+                                <th
+                                    className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                    onClick={() => handleSort('score')}
+                                >
+                                    <div className="flex items-center justify-center gap-1">
+                                        Score
+                                        <SortIcon column="score" />
+                                    </div>
                                 </th>
-                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                                    Signal
+                                <th
+                                    className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                    onClick={() => handleSort('signal')}
+                                >
+                                    <div className="flex items-center gap-1">
+                                        Signal
+                                        <SortIcon column="signal" />
+                                    </div>
                                 </th>
-                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                                    Added
+                                <th
+                                    className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                    onClick={() => handleSort('date_added')}
+                                >
+                                    <div className="flex items-center justify-end gap-1">
+                                        Added
+                                        <SortIcon column="date_added" />
+                                    </div>
                                 </th>
                                 <th className="px-4 py-3 w-12"></th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {items.map((item) => (
+                            {sortedItems.map((item) => (
                                 <WatchlistRow
                                     key={item.id}
                                     item={item}
@@ -162,6 +249,10 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
         </div>
     );
 }
+
+
+
+
 
 
 
