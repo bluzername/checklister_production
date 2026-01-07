@@ -350,4 +350,7 @@ export interface WatchlistItem {
   score?: number;
   is_good_entry?: boolean;
   analysis?: AnalysisResult;
+  // Staleness tracking (computed from date_added)
+  days_in_watchlist?: number;    // Days since added
+  staleness_percent?: number;    // 0-100, capped at 100 for 45+ days
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Loader2, RefreshCw, Eye, Sparkles, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { Loader2, RefreshCw, Eye, Sparkles, ChevronUp, ChevronDown, ChevronsUpDown, AlertTriangle } from 'lucide-react';
 import { WatchlistItem } from '@/lib/types';
 import { analyzeWatchlist } from '@/app/watchlist-actions';
 import { AddWatchlistForm } from './AddWatchlistForm';
@@ -21,6 +21,7 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
     const [error, setError] = useState<string | null>(null);
     const [sortColumn, setSortColumn] = useState<SortColumn>('date_added');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+    const [expiringCount, setExpiringCount] = useState(0);
 
     // Handle column header click for sorting
     const handleSort = (column: SortColumn) => {
@@ -54,7 +55,8 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
                     comparison = (a.is_good_entry ? 1 : 0) - (b.is_good_entry ? 1 : 0);
                     break;
                 case 'date_added':
-                    comparison = new Date(a.date_added).getTime() - new Date(b.date_added).getTime();
+                    // Sort by days in watchlist (staleness)
+                    comparison = (a.days_in_watchlist || 0) - (b.days_in_watchlist || 0);
                     break;
             }
 
@@ -77,16 +79,17 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
     const loadWatchlist = useCallback(async (showRefresh = false) => {
         if (showRefresh) setRefreshing(true);
         else setLoading(true);
-        
+
         const result = await analyzeWatchlist();
-        
+
         if (result.success) {
             setItems(result.data || []);
+            setExpiringCount(result.expiring_count || 0);
             setError(null);
         } else {
             setError(result.error || 'Failed to load watchlist');
         }
-        
+
         setLoading(false);
         setRefreshing(false);
     }, []);
@@ -136,6 +139,23 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
                         </div>
                         <div className="text-sm text-emerald-600">
                             These stocks have high scores and are near support levels.
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Expiring Soon Warning */}
+            {expiringCount > 0 && (
+                <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                    <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                        <AlertTriangle className="w-5 h-5 text-amber-600" />
+                    </div>
+                    <div>
+                        <div className="font-semibold text-amber-800">
+                            {expiringCount} {expiringCount === 1 ? 'Item' : 'Items'} Expiring Soon
+                        </div>
+                        <div className="text-sm text-amber-600">
+                            Review or reset dates to keep watching. Items are auto-removed after 45 days.
                         </div>
                     </div>
                 </div>
@@ -196,11 +216,11 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
                                     </div>
                                 </th>
                                 <th
-                                    className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                                    className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
                                     onClick={() => handleSort('date_added')}
                                 >
-                                    <div className="flex items-center justify-end gap-1">
-                                        Added
+                                    <div className="flex items-center gap-1">
+                                        Age
                                         <SortIcon column="date_added" />
                                     </div>
                                 </th>
@@ -214,6 +234,7 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
                                     item={item}
                                     onDelete={() => loadWatchlist(true)}
                                     onSelect={onSelectItem}
+                                    onDateUpdate={() => loadWatchlist(true)}
                                 />
                             ))}
                         </tbody>

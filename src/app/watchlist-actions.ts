@@ -8,6 +8,30 @@ import { WatchlistItem, AnalysisResult } from '@/lib/types';
 // Increased to 20 for faster analysis since FMP has generous rate limits (300/min)
 const ANALYSIS_BATCH_SIZE = 20;
 
+// Staleness configuration
+const MAX_WATCHLIST_DAYS = 45; // Auto-remove after 45 days
+
+/**
+ * Calculate staleness metrics from date_added
+ */
+function calculateStaleness(dateAdded: string): { days: number; percent: number } {
+    const days = Math.floor((Date.now() - new Date(dateAdded).getTime()) / (1000 * 60 * 60 * 24));
+    const percent = Math.min(100, Math.round((days / MAX_WATCHLIST_DAYS) * 100));
+    return { days, percent };
+}
+
+/**
+ * Add staleness fields to a watchlist item
+ */
+function addStalenessFields<T extends { date_added: string }>(item: T): T & { days_in_watchlist: number; staleness_percent: number } {
+    const { days, percent } = calculateStaleness(item.date_added);
+    return {
+        ...item,
+        days_in_watchlist: days,
+        staleness_percent: percent,
+    };
+}
+
 /**
  * Process items in batches to avoid rate limiting while maintaining good performance.
  * Processes BATCH_SIZE items in parallel, then waits before the next batch.
@@ -39,23 +63,31 @@ export async function getWatchlist(): Promise<{ success: boolean; data?: Watchli
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-        
+
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
         }
 
+        // Calculate cutoff date for 45-day max
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - MAX_WATCHLIST_DAYS);
+
         const { data, error } = await supabase
             .from('watchlists')
             .select('*')
             .eq('user_id', user.id)
+            .gte('date_added', cutoffDate.toISOString())
             .order('date_added', { ascending: false });
 
         if (error) {
             return { success: false, error: error.message };
         }
 
-        return { success: true, data: data as WatchlistItem[] };
+        // Add staleness fields to each item
+        const itemsWithStaleness = (data || []).map(item => addStalenessFields(item) as WatchlistItem);
+
+        return { success: true, data: itemsWithStaleness };
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
@@ -143,26 +175,32 @@ function isGoodEntry(analysis: AnalysisResult): boolean {
     return nearSupport || success_probability >= 80;
 }
 
-export async function analyzeWatchlist(): Promise<{ 
-    success: boolean; 
-    data?: WatchlistItem[]; 
-    error?: string 
+export async function analyzeWatchlist(): Promise<{
+    success: boolean;
+    data?: WatchlistItem[];
+    error?: string;
+    expiring_count?: number;  // Items with 40+ days
 }> {
     try {
         if (!isSupabaseConfigured()) {
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-        
+
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
         }
 
+        // Calculate cutoff date for 45-day max
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - MAX_WATCHLIST_DAYS);
+
         const { data: items, error } = await supabase
             .from('watchlists')
             .select('*')
             .eq('user_id', user.id)
+            .gte('date_added', cutoffDate.toISOString())
             .order('date_added', { ascending: false });
 
         if (error) {
@@ -170,7 +208,7 @@ export async function analyzeWatchlist(): Promise<{
         }
 
         if (!items || items.length === 0) {
-            return { success: true, data: [] };
+            return { success: true, data: [], expiring_count: 0 };
         }
 
         // Analyze watchlist items in batches to avoid rate limiting while maintaining performance
@@ -179,22 +217,26 @@ export async function analyzeWatchlist(): Promise<{
             async (item) => {
                 try {
                     const analysis = await analyzeTicker(item.ticker);
+                    const itemWithStaleness = addStalenessFields(item);
 
                     return {
-                        ...item,
+                        ...itemWithStaleness,
                         current_price: analysis.current_price,
                         score: analysis.success_probability,
                         is_good_entry: isGoodEntry(analysis),
                         analysis,
                     } as WatchlistItem;
                 } catch {
-                    // If analysis fails, return item without analysis
-                    return item as WatchlistItem;
+                    // If analysis fails, return item with staleness but without analysis
+                    return addStalenessFields(item) as WatchlistItem;
                 }
             }
         );
 
-        return { success: true, data: analyzedItems };
+        // Count items expiring soon (40+ days)
+        const expiringCount = analyzedItems.filter(item => (item.days_in_watchlist || 0) >= 40).length;
+
+        return { success: true, data: analyzedItems, expiring_count: expiringCount };
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
@@ -228,11 +270,11 @@ export async function analyzeWatchlistItem(id: string): Promise<{
         }
 
         const analysis = await analyzeTicker(item.ticker);
-        
+
         return {
             success: true,
             data: {
-                ...item,
+                ...addStalenessFields(item),
                 current_price: analysis.current_price,
                 score: analysis.success_probability,
                 is_good_entry: isGoodEntry(analysis),
@@ -244,3 +286,39 @@ export async function analyzeWatchlistItem(id: string): Promise<{
     }
 }
 
+export async function updateWatchlistDate(
+    id: string,
+    newDate?: Date
+): Promise<{ success: boolean; data?: WatchlistItem; error?: string }> {
+    try {
+        if (!isSupabaseConfigured()) {
+            return { success: false, error: 'Database not configured' };
+        }
+        const supabase = await createClient();
+
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            return { success: false, error: 'Not authenticated' };
+        }
+
+        // Use provided date or default to now (reset to today)
+        const dateToSet = newDate || new Date();
+
+        const { data, error } = await supabase
+            .from('watchlists')
+            .update({ date_added: dateToSet.toISOString() })
+            .eq('id', id)
+            .eq('user_id', user.id)
+            .select()
+            .single();
+
+        if (error) {
+            return { success: false, error: error.message };
+        }
+
+        // Return item with staleness fields
+        return { success: true, data: addStalenessFields(data) as WatchlistItem };
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+}
