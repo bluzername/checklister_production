@@ -3,7 +3,6 @@
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server';
 import { analyzeTicker } from '@/lib/analysis';
 import { WatchlistItem, AnalysisResult } from '@/lib/types';
-import { logWatchlistOperation } from '@/lib/activity-logger';
 
 export async function getWatchlist(): Promise<{ success: boolean; data?: WatchlistItem[]; error?: string }> {
     try {
@@ -42,7 +41,7 @@ export async function addToWatchlist(
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-
+        
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
@@ -65,15 +64,6 @@ export async function addToWatchlist(
             return { success: false, error: error.message };
         }
 
-        // Fire-and-forget logging - no extra API calls
-        logWatchlistOperation(
-            user.id,
-            'ADD_WATCHLIST',
-            ticker.toUpperCase(),
-            { notes: notes },
-            null  // Don't fetch analysis just for logging - avoids rate limits
-        ).catch(err => console.error('[Watchlist] Logging error:', err));
-
         return { success: true, data: data as WatchlistItem };
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -86,19 +76,11 @@ export async function removeFromWatchlist(id: string): Promise<{ success: boolea
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-
+        
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
         }
-
-        // Fetch item details before deletion for logging
-        const { data: item } = await supabase
-            .from('watchlists')
-            .select('*')
-            .eq('id', id)
-            .eq('user_id', user.id)
-            .single();
 
         const { error } = await supabase
             .from('watchlists')
@@ -108,17 +90,6 @@ export async function removeFromWatchlist(id: string): Promise<{ success: boolea
 
         if (error) {
             return { success: false, error: error.message };
-        }
-
-        // Fire-and-forget logging - no extra API calls
-        if (item) {
-            logWatchlistOperation(
-                user.id,
-                'REMOVE_WATCHLIST',
-                item.ticker,
-                { notes: `Removed from watchlist. Original notes: ${item.notes || 'none'}` },
-                null  // Don't fetch analysis just for logging - avoids rate limits
-            ).catch(err => console.error('[Watchlist] Logging error:', err));
         }
 
         return { success: true };

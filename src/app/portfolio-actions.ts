@@ -9,7 +9,6 @@ import {
   markCacheRefreshing,
   invalidateCache
 } from '@/lib/portfolio/cache';
-import { logPortfolioOperation } from '@/lib/activity-logger';
 
 export type SellPriceLevel = 'stop_loss' | 'pt1' | 'pt2' | 'pt3';
 
@@ -52,7 +51,7 @@ export async function addPosition(
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-
+        
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
@@ -77,20 +76,6 @@ export async function addPosition(
         // Invalidate cache when position is added
         invalidateCache(user.id);
 
-        // Fire-and-forget logging (non-blocking) - no extra API calls
-        logPortfolioOperation(
-            user.id,
-            'ADD_POSITION',
-            ticker.toUpperCase(),
-            {
-                position_id: data.id,
-                buy_price: buyPrice,
-                quantity: quantity,
-                notes: notes,
-            },
-            null  // Don't fetch analysis just for logging - avoids rate limits
-        ).catch(err => console.error('[Portfolio] Logging error:', err));
-
         return { success: true, data: data as PortfolioPosition };
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -103,19 +88,11 @@ export async function deletePosition(id: string): Promise<{ success: boolean; er
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-
+        
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
         }
-
-        // Fetch position details before deletion for logging
-        const { data: position } = await supabase
-            .from('portfolios')
-            .select('*')
-            .eq('id', id)
-            .eq('user_id', user.id)
-            .single();
 
         const { error } = await supabase
             .from('portfolios')
@@ -129,22 +106,6 @@ export async function deletePosition(id: string): Promise<{ success: boolean; er
 
         // Invalidate cache when position is deleted
         invalidateCache(user.id);
-
-        // Log the DELETE_POSITION operation - no extra API calls
-        if (position) {
-            logPortfolioOperation(
-                user.id,
-                'DELETE_POSITION',
-                position.ticker,
-                {
-                    position_id: id,
-                    buy_price: position.buy_price,
-                    quantity: position.quantity,
-                    notes: `Position deleted`,
-                },
-                null  // Don't fetch analysis just for logging - avoids rate limits
-            ).catch(err => console.error('[Portfolio] Logging error:', err));
-        }
 
         return { success: true };
     } catch (error) {
@@ -226,26 +187,6 @@ export async function recordSellAtPrice(
 
         // Invalidate cache when sells are recorded
         invalidateCache(user.id);
-
-        // Calculate P/L for this specific sell
-        const sellPnlPercent = ((sellPrice - position.buy_price) / position.buy_price) * 100;
-
-        // Log the RECORD_SELL operation - no extra API calls
-        logPortfolioOperation(
-            user.id,
-            'RECORD_SELL',
-            position.ticker,
-            {
-                position_id: positionId,
-                buy_price: position.buy_price,
-                quantity: position.quantity,
-                sell_price: sellPrice,
-                shares_sold: sharesSold,
-                price_level: priceLevel,
-                notes: `Sold ${sharesSold} shares at ${priceLevel.toUpperCase()} for $${sellPrice} (P/L: ${sellPnlPercent.toFixed(2)}%)`,
-            },
-            null  // Don't fetch analysis just for logging - avoids rate limits
-        ).catch(err => console.error('[Portfolio] Logging error:', err));
 
         return { success: true };
     } catch (error) {
