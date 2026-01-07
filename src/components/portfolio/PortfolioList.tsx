@@ -63,6 +63,14 @@ export function PortfolioList({ onSelectPosition }: PortfolioListProps) {
         loadPortfolio(true);  // Force refresh
     };
 
+    const handleAddPosition = useCallback((newPosition: PortfolioPosition) => {
+        // Append new position to the list (it will be sorted by useMemo)
+        setPositions(prev => [newPosition, ...prev]);
+        // Update timestamp since we have fresh data for this position
+        setLastUpdated(Date.now());
+        setFromCache(false);
+    }, []);
+
     const handleSort = (field: SortField) => {
         if (sortField === field) {
             setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -128,7 +136,7 @@ export function PortfolioList({ onSelectPosition }: PortfolioListProps) {
         <div className="space-y-4">
             {/* Header */}
             <div className="flex items-center justify-between">
-                <AddPositionForm onSuccess={() => loadPortfolio(true)} />
+                <AddPositionForm onSuccess={handleAddPosition} />
                 <div className="flex items-center gap-3">
                     {/* Cache status indicator */}
                     {lastUpdated && (

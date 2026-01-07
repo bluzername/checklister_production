@@ -80,7 +80,7 @@ export async function addPosition(
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-        
+
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
@@ -105,7 +105,36 @@ export async function addPosition(
         // Invalidate cache when position is added
         invalidateCache(user.id);
 
-        return { success: true, data: data as PortfolioPosition };
+        // Analyze the newly added position immediately
+        try {
+            const analysis = await analyzeTicker(data.ticker);
+            const position = data as PortfolioPosition;
+            const action = computeAction(position, analysis);
+            const profitLoss = analysis.current_price - position.buy_price;
+            const profitLossPercent = ((analysis.current_price - position.buy_price) / position.buy_price) * 100;
+
+            return {
+                success: true,
+                data: {
+                    ...position,
+                    current_price: analysis.current_price,
+                    action,
+                    profit_loss: profitLoss,
+                    profit_loss_percent: profitLossPercent,
+                    analysis,
+                    remaining_shares: position.quantity,
+                } as PortfolioPosition,
+            };
+        } catch {
+            // If analysis fails, return position without analysis
+            return {
+                success: true,
+                data: {
+                    ...data,
+                    remaining_shares: data.quantity,
+                } as PortfolioPosition,
+            };
+        }
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }

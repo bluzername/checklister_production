@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { Plus, Loader2, X } from 'lucide-react';
+import { PortfolioPosition } from '@/lib/types';
 import { addPosition } from '@/app/portfolio-actions';
 
 interface AddPositionFormProps {
-    onSuccess: () => void;
+    onSuccess: (position: PortfolioPosition) => void;
 }
 
 export function AddPositionForm({ onSuccess }: AddPositionFormProps) {
@@ -29,13 +30,13 @@ export function AddPositionForm({ onSuccess }: AddPositionFormProps) {
             notes || undefined
         );
 
-        if (result.success) {
+        if (result.success && result.data) {
             setTicker('');
             setBuyPrice('');
             setQuantity('');
             setNotes('');
             setIsOpen(false);
-            onSuccess();
+            onSuccess(result.data);
         } else {
             setError(result.error || 'Failed to add position');
         }
@@ -144,6 +145,10 @@ export function AddPositionForm({ onSuccess }: AddPositionFormProps) {
         </form>
     );
 }
+
+
+
+
 
 
 
