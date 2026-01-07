@@ -102,7 +102,7 @@ export async function addToWatchlist(
             return { success: false, error: 'Database not configured' };
         }
         const supabase = await createClient();
-        
+
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
             return { success: false, error: 'Not authenticated' };
@@ -125,7 +125,25 @@ export async function addToWatchlist(
             return { success: false, error: error.message };
         }
 
-        return { success: true, data: data as WatchlistItem };
+        // Analyze the newly added ticker immediately
+        try {
+            const analysis = await analyzeTicker(data.ticker);
+            const itemWithStaleness = addStalenessFields(data);
+
+            return {
+                success: true,
+                data: {
+                    ...itemWithStaleness,
+                    current_price: analysis.current_price,
+                    score: analysis.success_probability,
+                    is_good_entry: isGoodEntry(analysis),
+                    analysis,
+                } as WatchlistItem,
+            };
+        } catch {
+            // If analysis fails, return item with staleness but without analysis
+            return { success: true, data: addStalenessFields(data) as WatchlistItem };
+        }
     } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }

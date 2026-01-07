@@ -7,6 +7,8 @@ import { analyzeWatchlist } from '@/app/watchlist-actions';
 import { AddWatchlistForm } from './AddWatchlistForm';
 import { WatchlistRow } from './WatchlistRow';
 
+const EXPIRING_THRESHOLD_DAYS = 40;
+
 type SortColumn = 'ticker' | 'price' | 'score' | 'signal' | 'date_added';
 type SortDirection = 'asc' | 'desc';
 
@@ -102,6 +104,15 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
         loadWatchlist(true);
     };
 
+    const handleAddItem = useCallback((newItem: WatchlistItem) => {
+        // Append new item to the list (it will be sorted by the useMemo)
+        setItems(prev => [newItem, ...prev]);
+        // Update expiring count if needed
+        if ((newItem.days_in_watchlist || 0) >= EXPIRING_THRESHOLD_DAYS) {
+            setExpiringCount(prev => prev + 1);
+        }
+    }, []);
+
     const goodEntryCount = items.filter(i => i.is_good_entry).length;
 
     if (loading) {
@@ -116,7 +127,7 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
         <div className="space-y-4">
             {/* Header */}
             <div className="flex items-center justify-between">
-                <AddWatchlistForm onSuccess={() => loadWatchlist(true)} />
+                <AddWatchlistForm onSuccess={handleAddItem} />
                 <button
                     onClick={handleRefresh}
                     disabled={refreshing}

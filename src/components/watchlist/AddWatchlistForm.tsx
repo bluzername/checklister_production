@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { Plus, Loader2, X } from 'lucide-react';
+import { WatchlistItem } from '@/lib/types';
 import { addToWatchlist } from '@/app/watchlist-actions';
 
 interface AddWatchlistFormProps {
-    onSuccess: () => void;
+    onSuccess: (item: WatchlistItem) => void;
 }
 
 export function AddWatchlistForm({ onSuccess }: AddWatchlistFormProps) {
@@ -22,11 +23,11 @@ export function AddWatchlistForm({ onSuccess }: AddWatchlistFormProps) {
 
         const result = await addToWatchlist(ticker, notes || undefined);
 
-        if (result.success) {
+        if (result.success && result.data) {
             setTicker('');
             setNotes('');
             setIsOpen(false);
-            onSuccess();
+            onSuccess(result.data);
         } else {
             setError(result.error || 'Failed to add to watchlist');
         }
@@ -109,6 +110,10 @@ export function AddWatchlistForm({ onSuccess }: AddWatchlistFormProps) {
         </form>
     );
 }
+
+
+
+
 
 
 
