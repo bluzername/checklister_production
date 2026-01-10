@@ -1,15 +1,18 @@
 /**
- * Quiver Quantitative API Client
- * Fetches insider trades (SEC Form 4) and congressional trading disclosures.
- * https://api.quiverquant.com/beta
+ * Soft Signals Data Service
+ * Fetches insider trades from Financial Modeling Prep (FMP) API.
+ * https://financialmodelingprep.com/stable/insider-trading/latest
  *
  * This provides the data for Criterion 11 (Soft Signals) in the analysis system.
+ *
+ * NOTE: Congress trading data is currently unavailable (FMP endpoints return empty).
+ * Will be added when a working data source is found.
  */
 
 import { withLogging, logApiCall } from './logger';
 import { cacheKey, getOrFetch, TTL } from './cache';
 
-const QUIVER_BASE_URL = 'https://api.quiverquant.com/beta';
+const FMP_BASE_URL = 'https://financialmodelingprep.com/stable';
 
 // ============================================
 // TYPES
@@ -50,7 +53,7 @@ export interface SoftSignalsData {
     insider_last_buy_date: string | null;
     insider_recent_activity: boolean; // Activity in last 30 days
 
-    // Congress data (last 90 days)
+    // Congress data (last 90 days) - currently unavailable
     congress_buys_count: number;
     congress_sells_count: number;
     congress_buy_ratio: number;
@@ -67,15 +70,35 @@ export interface SoftSignalsData {
     recent_congress_trades: CongressTrade[];
 }
 
+// FMP API response type
+interface FMPInsiderTrade {
+    symbol: string;
+    filingDate: string;
+    transactionDate: string;
+    reportingCik: string;
+    companyCik: string;
+    transactionType: string;
+    securitiesOwned: number;
+    reportingName: string;
+    typeOfOwner: string;
+    acquisitionOrDisposition: 'A' | 'D';
+    directOrIndirect: string;
+    formType: string;
+    securitiesTransacted: number;
+    price: number;
+    securityName: string;
+    url: string;
+}
+
 // ============================================
 // CONFIGURATION CHECK
 // ============================================
 
 /**
- * Check if Quiver API is configured
+ * Check if FMP API is configured
  */
 export function isQuiverConfigured(): boolean {
-    return !!process.env.QUIVER_API_KEY;
+    return !!process.env.FMP_API_KEY;
 }
 
 // ============================================
@@ -83,32 +106,37 @@ export function isQuiverConfigured(): boolean {
 // ============================================
 
 /**
- * Parse transaction type from Quiver API format
+ * Parse transaction type from FMP format
+ * acquisitionOrDisposition: A = Acquisition (BUY), D = Disposition (SELL)
+ * transactionType: P = Purchase, S = Sale, G = Gift, etc.
  */
-function parseTransactionType(type: string): 'BUY' | 'SELL' | 'OPTION' {
-    const lower = (type || '').toLowerCase();
-    if (lower.includes('purchase') || lower.includes('buy') || lower.includes('acquisition') || lower === 'p') {
+function parseTransactionType(trade: FMPInsiderTrade): 'BUY' | 'SELL' | 'OPTION' {
+    const txType = (trade.transactionType || '').toLowerCase();
+
+    // Check transaction type first
+    if (txType.includes('purchase') || txType === 'p' || txType === 'p-purchase') {
         return 'BUY';
     }
-    if (lower.includes('sale') || lower.includes('sell') || lower.includes('disposition') || lower === 's') {
+    if (txType.includes('sale') || txType === 's' || txType === 's-sale') {
         return 'SELL';
     }
-    return 'OPTION';
-}
+    if (txType.includes('option') || txType.includes('exercise') || txType === 'm') {
+        return 'OPTION';
+    }
+    if (txType.includes('gift') || txType === 'g' || txType === 'g-gift') {
+        // Gifts are dispositions but not really sells - treat as OPTION (neutral)
+        return 'OPTION';
+    }
 
-/**
- * Parse congressional amount range string to numbers
- * e.g., "$15,001 - $50,000" => { low: 15001, high: 50000 }
- */
-function parseAmountRange(amount: string): { low: number; high: number } {
-    if (!amount) return { low: 0, high: 0 };
-    const numbers = amount.match(/\$?([\d,]+)/g);
-    if (!numbers || numbers.length === 0) return { low: 0, high: 0 };
-    const parsed = numbers.map(n => parseInt(n.replace(/[$,]/g, ''), 10));
-    return {
-        low: Math.min(...parsed),
-        high: Math.max(...parsed),
-    };
+    // Fall back to acquisition/disposition flag
+    if (trade.acquisitionOrDisposition === 'A') {
+        return 'BUY';
+    }
+    if (trade.acquisitionOrDisposition === 'D') {
+        return 'SELL';
+    }
+
+    return 'OPTION';
 }
 
 /**
@@ -121,109 +149,114 @@ function calculateNetValue(buys: InsiderTrade[], sells: InsiderTrade[]): number 
 }
 
 // ============================================
-// API FETCH FUNCTIONS
+// BULK DATA CACHE
 // ============================================
 
+let allInsiderTradesCache: { data: InsiderTrade[]; timestamp: number } | null = null;
+const BULK_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
+
 /**
- * Generic Quiver API fetcher
+ * Fetch ALL recent insider trades (bulk endpoint)
+ * This is much more efficient than per-ticker queries
  */
-async function fetchFromQuiver<T>(endpoint: string): Promise<T> {
-    const apiKey = process.env.QUIVER_API_KEY;
+async function fetchAllInsiderTrades(): Promise<InsiderTrade[]> {
+    // Check cache
+    if (allInsiderTradesCache && Date.now() - allInsiderTradesCache.timestamp < BULK_CACHE_TTL) {
+        console.log('[FMP] Using cached bulk insider data');
+        return allInsiderTradesCache.data;
+    }
+
+    const apiKey = process.env.FMP_API_KEY;
     if (!apiKey) {
-        throw new Error('[QUIVER] API key not configured');
+        throw new Error('[FMP] API key not configured');
     }
 
-    const url = `${QUIVER_BASE_URL}${endpoint}`;
-    const response = await fetch(url, {
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Accept': 'application/json',
-        },
-    });
+    console.log('[FMP] Fetching bulk insider trades...');
 
-    if (!response.ok) {
-        throw new Error(`[QUIVER] API error: ${response.status} ${response.statusText}`);
-    }
+    // Fetch multiple pages to get more data
+    const allTrades: InsiderTrade[] = [];
+    const pagesToFetch = 5; // 500 trades total
 
-    return response.json();
-}
+    for (let page = 0; page < pagesToFetch; page++) {
+        const url = `${FMP_BASE_URL}/insider-trading/latest?page=${page}&limit=100&apikey=${apiKey}`;
+        const response = await fetch(url, {
+            headers: { 'Accept': 'application/json' },
+        });
 
-/**
- * Fetch insider trades for a ticker (last 90 days)
- */
-async function fetchInsiderTrades(ticker: string): Promise<InsiderTrade[]> {
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = await fetchFromQuiver<any[]>(`/historical/insiders/${ticker}`);
+        if (!response.ok) {
+            console.error(`[FMP] API error: ${response.status} ${response.statusText}`);
+            break;
+        }
 
-        if (!Array.isArray(data)) {
-            return [];
+        const data: FMPInsiderTrade[] = await response.json();
+
+        if (!Array.isArray(data) || data.length === 0) {
+            break;
         }
 
         const ninetyDaysAgo = new Date();
         ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-        return data
+        const trades = data
             .filter(trade => {
-                const tradeDate = new Date(trade.Date || trade.TransactionDate);
+                const tradeDate = new Date(trade.transactionDate);
                 return !isNaN(tradeDate.getTime()) && tradeDate >= ninetyDaysAgo;
             })
             .map(trade => ({
-                ticker: trade.Ticker || ticker,
-                name: trade.Name || 'Unknown',
-                title: trade.Title || 'Unknown',
-                transactionType: parseTransactionType(trade.Transaction || trade.TransactionType),
-                shares: Math.abs(trade.Shares || 0),
-                pricePerShare: trade.Price || null,
-                totalValue: trade.Value || null,
-                filingDate: trade.FilingDate || trade.Date,
-                transactionDate: trade.Date || trade.TransactionDate,
+                ticker: trade.symbol,
+                name: trade.reportingName || 'Unknown',
+                title: trade.typeOfOwner || 'Unknown',
+                transactionType: parseTransactionType(trade),
+                shares: Math.abs(trade.securitiesTransacted || 0),
+                pricePerShare: trade.price || null,
+                totalValue: trade.price && trade.securitiesTransacted
+                    ? Math.abs(trade.price * trade.securitiesTransacted)
+                    : null,
+                filingDate: trade.filingDate,
+                transactionDate: trade.transactionDate,
             }));
+
+        allTrades.push(...trades);
+
+        // Small delay between pages
+        if (page < pagesToFetch - 1) {
+            await new Promise(r => setTimeout(r, 100));
+        }
+    }
+
+    console.log(`[FMP] Fetched ${allTrades.length} insider trades`);
+
+    // Update cache
+    allInsiderTradesCache = {
+        data: allTrades,
+        timestamp: Date.now(),
+    };
+
+    return allTrades;
+}
+
+/**
+ * Get insider trades for a specific ticker (from bulk cache)
+ */
+async function fetchInsiderTrades(ticker: string): Promise<InsiderTrade[]> {
+    try {
+        const allTrades = await fetchAllInsiderTrades();
+        const tickerUpper = ticker.toUpperCase();
+        return allTrades.filter(t => t.ticker.toUpperCase() === tickerUpper);
     } catch (error) {
-        console.error(`[QUIVER] Error fetching insider trades for ${ticker}:`, error);
+        console.error(`[FMP] Error fetching insider trades for ${ticker}:`, error);
         return [];
     }
 }
 
 /**
- * Fetch congressional trades for a ticker (last 90 days)
+ * Fetch congressional trades for a ticker
+ * NOTE: Currently returns empty - FMP congress endpoints don't work
  */
 async function fetchCongressTrades(ticker: string): Promise<CongressTrade[]> {
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = await fetchFromQuiver<any[]>(`/historical/congresstrading/${ticker}`);
-
-        if (!Array.isArray(data)) {
-            return [];
-        }
-
-        const ninetyDaysAgo = new Date();
-        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-
-        return data
-            .filter(trade => {
-                const tradeDate = new Date(trade.TransactionDate);
-                return !isNaN(tradeDate.getTime()) && tradeDate >= ninetyDaysAgo;
-            })
-            .map(trade => {
-                const amountRange = parseAmountRange(trade.Amount || '');
-                return {
-                    ticker: trade.Ticker || ticker,
-                    representative: trade.Representative || 'Unknown',
-                    party: (trade.Party || 'I') as 'D' | 'R' | 'I',
-                    house: (trade.House || 'House') as 'House' | 'Senate',
-                    transactionType: (trade.Transaction?.toLowerCase().includes('purchase') ? 'BUY' : 'SELL') as 'BUY' | 'SELL',
-                    amount: trade.Amount || '$0',
-                    amountLow: amountRange.low,
-                    amountHigh: amountRange.high,
-                    transactionDate: trade.TransactionDate,
-                    disclosureDate: trade.DisclosureDate || trade.TransactionDate,
-                };
-            });
-    } catch (error) {
-        console.error(`[QUIVER] Error fetching congress trades for ${ticker}:`, error);
-        return [];
-    }
+    // FMP congress trading endpoints return empty arrays
+    // TODO: Add alternative source (House Stock Watcher, etc.)
+    return [];
 }
 
 // ============================================
@@ -240,11 +273,16 @@ export function calculateSoftSignalScore(
 ): { score: number; strength: 'STRONG' | 'MODERATE' | 'WEAK' | 'NONE' } {
     let score = 5; // Neutral baseline
 
+    // Filter out options/gifts - only count real buys and sells
+    const realInsiderTrades = insiderTrades.filter(t =>
+        t.transactionType === 'BUY' || t.transactionType === 'SELL'
+    );
+
     // ===== INSIDER SCORING =====
-    const insiderBuys = insiderTrades.filter(t => t.transactionType === 'BUY');
-    const insiderSells = insiderTrades.filter(t => t.transactionType === 'SELL');
-    const insiderBuyRatio = insiderTrades.length > 0
-        ? insiderBuys.length / insiderTrades.length
+    const insiderBuys = realInsiderTrades.filter(t => t.transactionType === 'BUY');
+    const insiderSells = realInsiderTrades.filter(t => t.transactionType === 'SELL');
+    const insiderBuyRatio = realInsiderTrades.length > 0
+        ? insiderBuys.length / realInsiderTrades.length
         : 0.5;
 
     // Strong insider buying (3+ buys with >70% buy ratio)
@@ -262,7 +300,7 @@ export function calculateSoftSignalScore(
 
     // C-suite buying is especially bullish
     const cSuiteBuys = insiderBuys.filter(t =>
-        /CEO|CFO|COO|President|Chairman/i.test(t.title)
+        /CEO|CFO|COO|President|Chairman|Chief/i.test(t.title)
     );
     if (cSuiteBuys.length > 0) {
         score += 1;
@@ -323,11 +361,11 @@ export function calculateSoftSignalScore(
 // ============================================
 
 /**
- * Fetch and aggregate soft signals data from Quiver API
+ * Fetch and aggregate soft signals data
  */
 async function fetchSoftSignalsFromApi(ticker: string): Promise<SoftSignalsData> {
     if (!isQuiverConfigured()) {
-        console.warn('[QUIVER] API key not configured, returning empty soft signals');
+        console.warn('[FMP] API key not configured, returning empty soft signals');
         return getEmptySoftSignals();
     }
 
@@ -338,9 +376,14 @@ async function fetchSoftSignalsFromApi(ticker: string): Promise<SoftSignalsData>
             fetchCongressTrades(ticker),
         ]);
 
+        // Filter to only real buys/sells for metrics
+        const realInsiderTrades = insiderTrades.filter(t =>
+            t.transactionType === 'BUY' || t.transactionType === 'SELL'
+        );
+
         // Calculate metrics
-        const insiderBuys = insiderTrades.filter(t => t.transactionType === 'BUY');
-        const insiderSells = insiderTrades.filter(t => t.transactionType === 'SELL');
+        const insiderBuys = realInsiderTrades.filter(t => t.transactionType === 'BUY');
+        const insiderSells = realInsiderTrades.filter(t => t.transactionType === 'SELL');
         const congressBuys = congressTrades.filter(t => t.transactionType === 'BUY');
         const congressSells = congressTrades.filter(t => t.transactionType === 'SELL');
 
@@ -363,8 +406,8 @@ async function fetchSoftSignalsFromApi(ticker: string): Promise<SoftSignalsData>
         return {
             insider_buys_count: insiderBuys.length,
             insider_sells_count: insiderSells.length,
-            insider_buy_ratio: insiderTrades.length > 0
-                ? Math.round((insiderBuys.length / insiderTrades.length) * 100) / 100
+            insider_buy_ratio: realInsiderTrades.length > 0
+                ? Math.round((insiderBuys.length / realInsiderTrades.length) * 100) / 100
                 : 0.5,
             insider_net_value: calculateNetValue(insiderBuys, insiderSells),
             insider_top_buyer: topBuyer ? `${topBuyer.name} (${topBuyer.title})` : null,
@@ -385,13 +428,13 @@ async function fetchSoftSignalsFromApi(ticker: string): Promise<SoftSignalsData>
 
             combined_score: score,
             signal_strength: strength,
-            data_available: true,
+            data_available: insiderTrades.length > 0 || congressTrades.length > 0,
 
             recent_insider_trades: insiderTrades.slice(0, 10),
             recent_congress_trades: congressTrades.slice(0, 10),
         };
     } catch (error) {
-        console.error(`[QUIVER] Error fetching soft signals for ${ticker}:`, error);
+        console.error(`[FMP] Error fetching soft signals for ${ticker}:`, error);
         throw error;
     }
 }
@@ -430,14 +473,14 @@ export function getEmptySoftSignals(): SoftSignalsData {
  * Main function to use in analysis pipeline
  */
 export async function getSoftSignals(ticker: string): Promise<SoftSignalsData> {
-    const key = cacheKey('quiver', 'soft_signals', ticker);
+    const key = cacheKey('fmp', 'soft_signals', ticker);
 
     try {
         const { data, cached } = await getOrFetch(
             key,
             TTL.SENTIMENT, // 1 hour TTL (same as sentiment)
             () => withLogging(
-                'quiver',
+                'fmp',
                 'soft_signals',
                 ticker,
                 () => fetchSoftSignalsFromApi(ticker)
@@ -459,7 +502,22 @@ export async function getSoftSignals(ticker: string): Promise<SoftSignalsData> {
         return data;
     } catch (error) {
         // Graceful degradation: return neutral data on failure
-        console.warn(`[QUIVER] Falling back to empty soft signals for ${ticker}`);
+        console.warn(`[FMP] Falling back to empty soft signals for ${ticker}`);
         return getEmptySoftSignals();
+    }
+}
+
+/**
+ * Get all tickers with recent insider activity
+ * Useful for recommendations feature
+ */
+export async function getTickersWithInsiderActivity(): Promise<string[]> {
+    try {
+        const allTrades = await fetchAllInsiderTrades();
+        const tickers = new Set(allTrades.map(t => t.ticker));
+        return Array.from(tickers);
+    } catch (error) {
+        console.error('[FMP] Error getting tickers with insider activity:', error);
+        return [];
     }
 }
