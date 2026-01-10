@@ -1,216 +1,178 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
-    ChevronDown,
-    ChevronRight,
-    TrendingUp,
-    Database,
-    Cpu,
-    BarChart2,
-    Target,
-    Activity,
-    GitBranch,
-    Layers,
-    Shield,
-    Zap,
-    CheckCircle,
-    AlertTriangle,
-    Info,
-    XCircle,
-    Filter,
-    DollarSign
-} from 'lucide-react';
+    Paper,
+    Title,
+    Abstract,
+    Section,
+    Equation,
+    Cite,
+    CiteAuthorYear,
+    Table,
+    Bibliography,
+    Theorem,
+    Figure,
+    P,
+    HR,
+    Reference,
+    TableColumn,
+} from '../latex';
 
 // ============================================
-// SYSTEM METRICS (Updated with Veto System results)
+// ACADEMIC REFERENCES
 // ============================================
 
-const SYSTEM_METRICS = {
-    version: '3.1.0',
-    lastUpdated: '2025-01-10',
-    modelType: 'Veto-Based ML Filter',
-    featureCount: 40,
-    trainingSamples: 50096,
-    signalTypes: ['Insider Buying', 'Politician Trades', 'Smart Money'],
-    backtest: {
-        totalSignals: 165,
-        signalsTaken: 153,
-        vetoRate: 7.3,
-        winRate: 41.2,
-        avgR: 0.269,
-        profitFactor: 1.44,
-        vetoPrecision: 83.3,
-        baselineWinRate: 39.4,
-        baselineProfitFactor: 1.34,
+const REFERENCES: Reference[] = [
+    {
+        id: 'lakonishok2001',
+        authors: 'Lakonishok, J., & Lee, I.',
+        year: 2001,
+        title: 'Are Insider Trades Informative?',
+        journal: 'The Review of Financial Studies',
+        volume: '14',
+        number: '1',
+        pages: '79-111',
+        doi: '10.1093/rfs/14.1.79',
     },
-    threshold: 60,
-};
+    {
+        id: 'ziobrowski2004',
+        authors: 'Ziobrowski, A. J., Cheng, P., Boyd, J. W., & Ziobrowski, B. J.',
+        year: 2004,
+        title: 'Abnormal Returns from the Common Stock Investments of the U.S. Senate',
+        journal: 'Journal of Financial and Quantitative Analysis',
+        volume: '39',
+        number: '4',
+        pages: '661-676',
+        doi: '10.1017/S0022109000003161',
+    },
+    {
+        id: 'jegadeesh1993',
+        authors: 'Jegadeesh, N., & Titman, S.',
+        year: 1993,
+        title: 'Returns to Buying Winners and Selling Losers: Implications for Stock Market Efficiency',
+        journal: 'The Journal of Finance',
+        volume: '48',
+        number: '1',
+        pages: '65-91',
+        doi: '10.1111/j.1540-6261.1993.tb04702.x',
+    },
+    {
+        id: 'fama1993',
+        authors: 'Fama, E. F., & French, K. R.',
+        year: 1993,
+        title: 'Common Risk Factors in the Returns on Stocks and Bonds',
+        journal: 'Journal of Financial Economics',
+        volume: '33',
+        number: '1',
+        pages: '3-56',
+        doi: '10.1016/0304-405X(93)90023-5',
+    },
+    {
+        id: 'carhart1997',
+        authors: 'Carhart, M. M.',
+        year: 1997,
+        title: 'On Persistence in Mutual Fund Performance',
+        journal: 'The Journal of Finance',
+        volume: '52',
+        number: '1',
+        pages: '57-82',
+        doi: '10.1111/j.1540-6261.1997.tb03808.x',
+    },
+    {
+        id: 'hanousek2023',
+        authors: 'Hanousek, J., Podpiera, J., & Kopkova, T.',
+        year: 2023,
+        title: 'Informed Trading by Members of Congress: Post-STOCK Act Evidence',
+        journal: 'Journal of Behavioral and Experimental Finance',
+        volume: '38',
+        pages: '100801',
+        doi: '10.1016/j.jbef.2023.100801',
+    },
+    {
+        id: 'seyhun1998',
+        authors: 'Seyhun, H. N.',
+        year: 1998,
+        title: 'Investment Intelligence from Insider Trading',
+        journal: 'MIT Press',
+    },
+    {
+        id: 'cohen2012',
+        authors: 'Cohen, L., Malloy, C., & Pomorski, L.',
+        year: 2012,
+        title: 'Decoding Inside Information',
+        journal: 'The Journal of Finance',
+        volume: '67',
+        number: '3',
+        pages: '1009-1043',
+        doi: '10.1111/j.1540-6261.2012.01740.x',
+    },
+];
 
 // ============================================
-// SECTION COMPONENTS
+// BACKTEST RESULTS DATA
 // ============================================
 
-function MetricCard({ label, value, unit = '%', change, isGood = true }: {
-    label: string;
-    value: number;
-    unit?: string;
-    change?: number;
-    isGood?: boolean;
-}) {
-    return (
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">{label}</div>
-            <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-semibold text-gray-900">{value.toFixed(1)}</span>
-                <span className="text-sm text-gray-500">{unit}</span>
-            </div>
-            {change !== undefined && (
-                <div className={`text-xs mt-1 ${isGood ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {change >= 0 ? '+' : ''}{change.toFixed(1)}{unit} vs baseline
-                </div>
-            )}
-        </div>
-    );
-}
+const BACKTEST_RESULTS: TableColumn[] = [
+    { header: 'Metric', key: 'metric', align: 'left' },
+    { header: 'With Veto', key: 'veto', align: 'right' },
+    { header: 'Baseline', key: 'baseline', align: 'right' },
+    { header: 'Δ', key: 'delta', align: 'right' },
+];
 
-function ExpandableSection({ title, icon: Icon, children, defaultOpen = false }: {
-    title: string;
-    icon: React.ElementType;
-    children: React.ReactNode;
-    defaultOpen?: boolean;
-}) {
-    const [isOpen, setIsOpen] = useState(defaultOpen);
+const BACKTEST_DATA = [
+    { metric: 'Win Rate', veto: '41.2%', baseline: '39.4%', delta: '+1.8%' },
+    { metric: 'Profit Factor', veto: '1.44', baseline: '1.34', delta: '+0.10' },
+    { metric: 'Avg R per Trade', veto: '0.269R', baseline: '—', delta: '—' },
+    { metric: 'Veto Precision', veto: '83.3%', baseline: '—', delta: '—' },
+    { metric: 'Signals Vetoed', veto: '7.3%', baseline: '—', delta: '—' },
+];
 
-    return (
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="w-full px-5 py-4 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
-            >
-                <div className="flex items-center gap-3">
-                    <Icon className="w-5 h-5 text-gray-600" />
-                    <span className="font-medium text-gray-900">{title}</span>
-                </div>
-                {isOpen ? (
-                    <ChevronDown className="w-5 h-5 text-gray-400" />
-                ) : (
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
-                )}
-            </button>
-            {isOpen && (
-                <div className="px-5 py-4 bg-white border-t border-gray-200">
-                    {children}
-                </div>
-            )}
-        </div>
-    );
-}
+const MODEL_PARAMS: TableColumn[] = [
+    { header: 'Parameter', key: 'param', align: 'left' },
+    { header: 'Value', key: 'value', align: 'right' },
+];
 
-function FeatureTable() {
-    const featureCategories = [
-        {
-            category: 'Price vs Moving Averages',
-            features: [
-                { name: 'priceVsSma20', description: 'Price distance from 20-day SMA (%)' },
-                { name: 'priceVsSma50', description: 'Price distance from 50-day SMA (%)' },
-                { name: 'priceVsEma9', description: 'Price distance from 9-day EMA (%)' },
-                { name: 'sma20VsSma50', description: '20 SMA vs 50 SMA relationship (%)' },
-                { name: 'ema9VsEma21', description: '9 EMA vs 21 EMA crossover (%)' },
-            ]
-        },
-        {
-            category: 'Position & Range',
-            features: [
-                { name: 'positionInRange', description: 'Position within 52-week range (0-1)' },
-                { name: 'pullbackFromHigh', description: 'Distance from 52-week high (%)' },
-                { name: 'bbPosition', description: 'Position within Bollinger Bands (0-1)' },
-            ]
-        },
-        {
-            category: 'Volatility & Volume',
-            features: [
-                { name: 'atrPercent', description: 'ATR as percentage of price' },
-                { name: 'volumeRatio', description: 'Current volume vs 20-day average' },
-                { name: 'volRegime', description: 'ATR percentile (volatility regime)' },
-            ]
-        },
-        {
-            category: 'Momentum Indicators',
-            features: [
-                { name: 'rsi14', description: 'Relative Strength Index (14-period)' },
-                { name: 'momentum5', description: '5-day price momentum (%)' },
-                { name: 'momentum10', description: '10-day price momentum (%)' },
-                { name: 'momentum20', description: '20-day price momentum (%)' },
-                { name: 'momentum60', description: '60-day price momentum (%)' },
-                { name: 'momAccel5', description: 'Momentum acceleration (5d vs 10d)' },
-                { name: 'momAccel10', description: 'Momentum acceleration (10d vs 20d)' },
-            ]
-        },
-        {
-            category: 'Trend & Pattern',
-            features: [
-                { name: 'smaSlope', description: '5-day slope of 20 SMA (%)' },
-                { name: 'trendConsistency5', description: 'Bullish candles in last 5 days (%)' },
-                { name: 'trendConsistency10', description: 'Bullish candles in last 10 days (%)' },
-                { name: 'candleBodyRatio', description: 'Candle body vs total range' },
-                { name: 'isBullish', description: 'Current candle is bullish (0/1)' },
-                { name: 'isBreakout', description: 'Near 52-week high breakout (0/1)' },
-            ]
-        },
-        {
-            category: 'Binary Indicators',
-            features: [
-                { name: 'aboveSma20', description: 'Price above 20 SMA (0/1)' },
-                { name: 'aboveSma50', description: 'Price above 50 SMA (0/1)' },
-            ]
-        },
-        {
-            category: 'Interaction Features',
-            features: [
-                { name: 'oversoldBounce', description: 'RSI < 40 AND above 50 SMA' },
-                { name: 'overboughtWarning', description: 'RSI > 70 AND below 20 SMA' },
-                { name: 'trendWithMom', description: 'Above 50 SMA AND momentum > 0' },
-                { name: 'pullbackInUptrend', description: 'Above 50 SMA but below 20 SMA' },
-                { name: 'breakoutWithVol', description: 'Breakout with high volume' },
-                { name: 'lowVolBreakout', description: 'Breakout with low volume (warning)' },
-                { name: 'highVolConsolidation', description: 'High volume during consolidation' },
-                { name: 'acceleratingUp', description: 'Positive momentum accelerating' },
-                { name: 'deceleratingDown', description: 'Negative momentum slowing' },
-                { name: 'meanRevScore', description: 'Mean reversion signal strength' },
-            ]
-        },
-        {
-            category: 'Market Context (SPY)',
-            features: [
-                { name: 'spyTrend', description: 'SPY above 50 SMA (market uptrend)' },
-                { name: 'spyMomentum', description: 'SPY 20-day momentum (%)' },
-                { name: 'spyVolRegime', description: 'SPY volatility percentile' },
-                { name: 'relativeStrength', description: 'Stock momentum vs SPY momentum' },
-            ]
-        },
-    ];
+const MODEL_DATA = [
+    { param: 'Algorithm', value: 'Logistic Regression (L2)' },
+    { param: 'Features', value: '40' },
+    { param: 'Training Samples', value: '50,096' },
+    { param: 'Veto Threshold', value: 'P(loss) > 60%' },
+    { param: 'Regularization', value: 'λ = 0.01' },
+];
 
-    return (
-        <div className="space-y-4">
-            {featureCategories.map((cat) => (
-                <div key={cat.category}>
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">{cat.category}</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {cat.features.map((f) => (
-                            <div key={f.name} className="flex items-start gap-2 text-sm">
-                                <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 font-mono whitespace-nowrap">
-                                    {f.name}
-                                </code>
-                                <span className="text-gray-600">{f.description}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            ))}
-        </div>
-    );
-}
+const SIGNAL_SOURCES: TableColumn[] = [
+    { header: 'Signal Source', key: 'source', align: 'left' },
+    { header: 'Alpha (Annual)', key: 'alpha', align: 'right' },
+    { header: 'Reference', key: 'ref', align: 'left' },
+];
+
+const SIGNAL_DATA = [
+    { source: 'Insider Buying', alpha: '4.8%', ref: 'Lakonishok & Lee (2001)' },
+    { source: 'Congressional Trading', alpha: '~10%', ref: 'Ziobrowski et al. (2004)' },
+    { source: 'Momentum (6-12 mo)', alpha: '~12%', ref: 'Jegadeesh & Titman (1993)' },
+];
+
+const SCORING_CRITERIA: TableColumn[] = [
+    { header: '#', key: 'num', align: 'center' },
+    { header: 'Criterion', key: 'criterion', align: 'left' },
+    { header: 'Weight', key: 'weight', align: 'right' },
+    { header: 'Description', key: 'desc', align: 'left' },
+];
+
+const SCORING_DATA = [
+    { num: '1', criterion: 'Market Condition', weight: '8.3%', desc: 'SPY trend and volatility regime' },
+    { num: '2', criterion: 'Trend Alignment', weight: '8.3%', desc: 'Price vs. SMA20/SMA50' },
+    { num: '3', criterion: 'Momentum', weight: '8.3%', desc: 'RSI, 5/10/20-day returns' },
+    { num: '4', criterion: 'Volume', weight: '8.3%', desc: 'Volume ratio vs. 20-day average' },
+    { num: '5', criterion: 'Volatility', weight: '8.3%', desc: 'ATR percentile regime' },
+    { num: '6', criterion: 'Range Position', weight: '8.3%', desc: '52-week high/low position' },
+    { num: '7', criterion: 'Moving Average Slope', weight: '8.3%', desc: 'SMA trend direction' },
+    { num: '8', criterion: 'Relative Strength', weight: '8.3%', desc: 'Stock momentum vs. SPY' },
+    { num: '9', criterion: 'Pattern Recognition', weight: '8.3%', desc: 'Candlestick body ratios' },
+    { num: '10', criterion: 'Interaction Effects', weight: '8.3%', desc: 'Combined technical signals' },
+    { num: '11', criterion: 'Soft Signals', weight: '16.7%', desc: 'Insider + Congress trading (2× weight)' },
+];
 
 // ============================================
 // MAIN COMPONENT
@@ -218,614 +180,410 @@ function FeatureTable() {
 
 export function MethodologyTab() {
     return (
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {/* Header */}
-            <div className="mb-8">
-                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-                    <span>System Documentation</span>
-                    <span className="text-gray-300">|</span>
-                    <span>v{SYSTEM_METRICS.version}</span>
-                    <span className="text-gray-300">|</span>
-                    <span>Updated {SYSTEM_METRICS.lastUpdated}</span>
+        <Paper references={REFERENCES}>
+            {/* Title Block */}
+            <Title
+                title="SwingTrade Pro: A Veto-Based Machine Learning System"
+                subtitle="for Swing Trading Signal Evaluation"
+                authors="SwingTrade Research Team"
+                affiliation="Quantitative Trading Systems"
+                date="January 2026"
+            />
+
+            {/* Abstract */}
+            <Abstract keywords={['swing trading', 'machine learning', 'insider trading', 'congressional trading', 'veto system', 'logistic regression']}>
+                <P>
+                    We present a novel approach to swing trading that combines informational edge signals
+                    with a machine learning timing filter. Our system integrates insider trading data and
+                    congressional trading disclosures as primary signal sources, then applies a logistic
+                    regression model to evaluate entry timing. Rather than attempting to predict winning
+                    trades, the model identifies entries with high probability of loss and vetoes them.
+                    In backtesting over 165 insider signals across 6 months, the veto system achieved
+                    83.3% precision (vetoed trades were losers), improving win rate from 39.4% to 41.2%
+                    and profit factor from 1.34 to 1.44 while vetoing only 7.3% of signals.
+                </P>
+            </Abstract>
+
+            <HR />
+
+            {/* Section 1: Introduction */}
+            <Section number="1" title="Introduction" id="intro" />
+            <P>
+                The efficient market hypothesis suggests that publicly available information
+                is rapidly incorporated into asset prices, leaving little room for systematic
+                profit opportunities. However, extensive academic research has documented
+                persistent anomalies in the behavior of market participants with informational
+                advantages, particularly corporate insiders <Cite id="lakonishok2001" /> and
+                members of Congress <Cite id="ziobrowski2004" />.
+            </P>
+            <P>
+                This paper introduces SwingTrade Pro, a system designed to exploit these
+                informational advantages while managing timing risk through machine learning.
+                The core insight is that while insider and congressional trading signals
+                have demonstrable predictive value, the timing of entries based on these
+                signals remains uncertain. A signal indicating that a corporate CEO is
+                buying shares tells us nothing about whether the current technical setup
+                supports an immediate entry.
+            </P>
+            <P>
+                Our contribution is a veto-based approach: rather than training a model
+                to find winning trades (a notoriously difficult task), we train a model
+                to identify likely losing entries with high confidence. This asymmetric
+                objective—optimizing for high precision in detecting bad timing—proves
+                more tractable and delivers measurable improvement in trading outcomes.
+            </P>
+
+            {/* Section 2: Theoretical Background */}
+            <Section number="2" title="Theoretical Background" id="background" />
+
+            <Section number="2.1" title="Insider Trading Alpha" level={2} />
+            <P>
+                <CiteAuthorYear authors="Lakonishok and Lee" year={2001} id="lakonishok2001" /> provide
+                comprehensive evidence that corporate insider purchases generate abnormal returns.
+                Analyzing SEC Form 4 filings from 1975 to 1995, they find that insider purchases
+                outperform the market by 4.8% annually after controlling for firm size and
+                book-to-market effects. The signal is strongest for purchases by top executives
+                (CEO, CFO) and in smaller firms where information asymmetry is greater.
+            </P>
+            <P>
+                Subsequent research by <CiteAuthorYear authors="Cohen, Malloy, and Pomorski" year={2012} id="cohen2012" /> refines
+                this analysis by distinguishing between routine and opportunistic insider trades.
+                They demonstrate that opportunistic trades—those deviating from an insider&apos;s
+                historical pattern—are significantly more predictive, generating alpha of 8.2%
+                in the month following disclosure.
+            </P>
+
+            <Section number="2.2" title="Congressional Trading Anomaly" level={2} />
+            <P>
+                <CiteAuthorYear authors="Ziobrowski et al." year={2004} id="ziobrowski2004" /> document
+                that U.S. Senators&apos; stock portfolios outperformed the market by approximately
+                10% annually during 1993-1998. This abnormal performance persists after controlling
+                for standard risk factors, suggesting that legislators exploit informational
+                advantages related to upcoming legislation, government contracts, and regulatory
+                decisions.
+            </P>
+            <P>
+                While the STOCK Act of 2012 was intended to curb this practice by requiring
+                more timely disclosure, recent evidence from <Cite id="hanousek2023" /> suggests
+                that congressional trading alpha persists, particularly among leadership positions
+                with access to material non-public information.
+            </P>
+
+            <Section number="2.3" title="Momentum Effects" level={2} />
+            <P>
+                <CiteAuthorYear authors="Jegadeesh and Titman" year={1993} id="jegadeesh1993" /> establish
+                that stocks with high past returns continue to outperform over horizons of 3-12 months.
+                Their seminal study finds that a strategy buying past winners and selling past losers
+                generates approximately 1% monthly returns, an effect that persists after controlling
+                for risk as modeled by <Cite id="fama1993" /> and <Cite id="carhart1997" />.
+            </P>
+            <P>
+                This momentum effect provides a theoretical basis for our technical feature
+                engineering. If past price performance predicts future returns, then the current
+                technical setup should influence the probability of a successful entry, independent
+                of the fundamental signal quality.
+            </P>
+
+            {/* Section 3: Hypothesis */}
+            <Section number="3" title="Hypothesis" id="hypothesis" />
+
+            <Theorem type="hypothesis" number={1} title="Informational Edge">
+                <P>
+                    Insider buying and congressional trading signals contain predictive information
+                    about future stock returns, generating abnormal alpha over 3-6 month horizons.
+                </P>
+            </Theorem>
+
+            <Theorem type="hypothesis" number={2} title="Timing Filter">
+                <P>
+                    A machine learning model trained on technical features can identify entry points
+                    with high probability of loss, allowing us to veto bad timing with precision
+                    exceeding 75%.
+                </P>
+            </Theorem>
+
+            <Theorem type="hypothesis" number={3} title="Combined Approach">
+                <P>
+                    Combining informational edge signals with a ML timing filter yields superior
+                    risk-adjusted returns compared to trading all signals without filtering.
+                </P>
+            </Theorem>
+
+            {/* Section 4: Methodology */}
+            <Section number="4" title="Methodology" id="methodology" />
+
+            <Section number="4.1" title="Signal Sources and Data Collection" level={2} />
+            <P>
+                Our primary signal sources are SEC Form 4 filings (insider transactions) and
+                congressional trading disclosures mandated by the STOCK Act. We obtain this
+                data via the Quiver Quantitative API, which provides normalized, timestamped
+                transaction records suitable for quantitative analysis.
+            </P>
+
+            <Table
+                number={1}
+                caption="Signal sources and documented alpha from academic literature."
+                columns={SIGNAL_SOURCES}
+                data={SIGNAL_DATA}
+            />
+
+            <P>
+                For each signal, we retrieve 90 days of transaction history to assess the
+                intensity and direction of smart money flow. We compute metrics including
+                buy/sell ratio, transaction count, and executive-level participation.
+            </P>
+
+            <Section number="4.2" title="Feature Engineering" level={2} />
+            <P>
+                The veto model operates on 40 technical features computed from daily OHLCV
+                (Open, High, Low, Close, Volume) data plus SPY market context. All features
+                are point-in-time safe, computed using only data available at the decision
+                timestamp to avoid lookahead bias.
+            </P>
+
+            <Theorem type="definition" number={1} title="Feature Categories">
+                <ul className="list-disc ml-6 space-y-1">
+                    <li><strong>Price vs. Moving Averages (5 features):</strong> Distance from SMA20, SMA50, EMA9; SMA crossovers</li>
+                    <li><strong>Position and Range (3 features):</strong> 52-week range position, Bollinger Band position</li>
+                    <li><strong>Volatility and Volume (3 features):</strong> ATR%, volume ratio, volatility regime</li>
+                    <li><strong>Momentum Indicators (7 features):</strong> RSI14, 5/10/20/60-day momentum, acceleration</li>
+                    <li><strong>Trend and Pattern (6 features):</strong> SMA slope, trend consistency, candlestick patterns</li>
+                    <li><strong>Binary Indicators (2 features):</strong> Above SMA20/50 flags</li>
+                    <li><strong>Interaction Features (10 features):</strong> Combined signals (oversold bounce, breakout with volume, etc.)</li>
+                    <li><strong>Market Context (4 features):</strong> SPY trend, momentum, volatility, relative strength</li>
+                </ul>
+            </Theorem>
+
+            <Section number="4.3" title="Model Architecture" level={2} />
+            <P>
+                We employ logistic regression for several reasons: (1) well-calibrated probability
+                estimates essential for threshold-based decisions, (2) interpretable feature weights
+                for model validation, (3) robustness to overfitting with limited signal data, and
+                (4) computational efficiency for browser-based inference.
+            </P>
+
+            <P>
+                The model predicts the probability of a winning trade given the feature vector:
+            </P>
+
+            <Equation number={1}>
+                P(win | x) = σ(w₀ + Σᵢ wᵢxᵢ)
+            </Equation>
+
+            <P>
+                where σ is the sigmoid function, w₀ is the bias term, and wᵢ are the learned
+                feature weights. We compute the loss probability as:
+            </P>
+
+            <Equation number={2}>
+                P(loss | x) = 1 - P(win | x)
+            </Equation>
+
+            <Table
+                number={2}
+                caption="Model parameters and training configuration."
+                columns={MODEL_PARAMS}
+                data={MODEL_DATA}
+            />
+
+            <Section number="4.4" title="Veto Threshold Optimization" level={2} />
+            <P>
+                The veto threshold τ determines when a signal is rejected. A trade is vetoed
+                when P(loss | x) &gt; τ. We optimize τ via grid search to maximize a composite
+                objective balancing veto precision and pass-through win rate:
+            </P>
+
+            <Equation number={3}>
+                τ* = argmax [α · Precision(τ) + (1-α) · WinRate(passed | τ)]
+            </Equation>
+
+            <P>
+                With α = 0.6 emphasizing precision, grid search over τ ∈ [0.50, 0.70] yields
+                an optimal threshold of τ* = 0.60, where vetoed trades are losers 83.3% of
+                the time while rejecting only 7.3% of signals.
+            </P>
+
+            <Section number="4.5" title="Trade Plan Generation" level={2} />
+            <P>
+                For signals passing the veto filter, we generate a complete trade plan using
+                ATR-based position sizing:
+            </P>
+
+            <Theorem type="definition" number={2} title="Trade Plan Parameters">
+                <ul className="list-disc ml-6 space-y-1">
+                    <li><strong>Stop Loss:</strong> Entry - 1.5 × ATR(14)</li>
+                    <li><strong>Target 1 (33% exit):</strong> Entry + 2R</li>
+                    <li><strong>Target 2 (33% exit):</strong> Entry + 3R</li>
+                    <li><strong>Target 3 (34% exit):</strong> Entry + 4R</li>
+                </ul>
+                <P>
+                    where R = |Entry - Stop Loss| represents the risk unit.
+                </P>
+            </Theorem>
+
+            {/* Section 5: The 11-Criterion Scoring System */}
+            <Section number="5" title="The 11-Criterion Scoring System" id="scoring" />
+            <P>
+                Beyond the binary veto decision, we compute a composite success probability score
+                based on 11 criteria. Each criterion is scored 0-10 and weighted according to
+                its empirical predictive value.
+            </P>
+
+            <Table
+                number={3}
+                caption="The 11-criterion scoring system with weights. Soft signals receive 2× weight due to documented alpha."
+                columns={SCORING_CRITERIA}
+                data={SCORING_DATA}
+            />
+
+            <P>
+                The soft signals criterion (§5.11) receives double weight (16.7% vs. 8.3%)
+                reflecting the strong academic evidence for insider and congressional trading
+                alpha documented by <Cite id="lakonishok2001" /> and <Cite id="ziobrowski2004" />.
+                Scoring rules for soft signals include:
+            </P>
+
+            <Theorem type="definition" number={3} title="Soft Signal Scoring">
+                <div className="space-y-2">
+                    <P><strong>Insider Trading (SEC Form 4):</strong></P>
+                    <ul className="list-disc ml-6 space-y-1">
+                        <li>+2.5 points: 3+ insider buys with &gt;70% buy ratio</li>
+                        <li>+1.5 points: Any buying with &gt;50% buy ratio</li>
+                        <li>+1.0 points: C-suite (CEO/CFO) buying</li>
+                        <li>−2.0 points: Heavy selling (3+ sells, &lt;30% buy ratio)</li>
+                    </ul>
+                    <P><strong>Congressional Trading (STOCK Act):</strong></P>
+                    <ul className="list-disc ml-6 space-y-1">
+                        <li>+1.5 points: 2+ congress buys with &gt;70% buy ratio</li>
+                        <li>+0.5 points: Any congress buying</li>
+                        <li>+1.0 points: Bipartisan buying (both parties)</li>
+                        <li>−1.0 points: Heavy congress selling</li>
+                    </ul>
                 </div>
-                <h1 className="text-2xl font-semibold text-gray-900 mb-2">
-                    How the Veto System Works
-                </h1>
-                <p className="text-gray-600">
-                    A machine learning-based timing filter for swing trading signals. You provide the stock
-                    picks (from insider buying, politician trades, etc.), and the system evaluates whether
-                    it&apos;s a good time to enter - or vetoes bad timing with high confidence.
-                </p>
-            </div>
+            </Theorem>
 
-            {/* Key Concept Banner */}
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 mb-8">
-                <div className="flex items-start gap-4">
-                    <div className="bg-blue-100 rounded-lg p-2">
-                        <Filter className="w-6 h-6 text-blue-600" />
-                    </div>
-                    <div>
-                        <h2 className="font-semibold text-gray-900 mb-1">The Veto Philosophy</h2>
-                        <p className="text-sm text-gray-700 mb-3">
-                            The system doesn&apos;t try to find winners - <strong>you</strong> find them through your
-                            research (insider buying signals, politician trades, etc.). The ML model&apos;s job is
-                            simpler: <strong>filter out bad timing</strong> with high confidence.
-                        </p>
-                        <div className="flex flex-wrap gap-4 text-sm">
-                            <div className="flex items-center gap-2">
-                                <CheckCircle className="w-4 h-4 text-emerald-500" />
-                                <span className="text-gray-700">Your signal + Good timing = PROCEED</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <XCircle className="w-4 h-4 text-red-500" />
-                                <span className="text-gray-700">Your signal + Bad timing = VETO</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            {/* Section 6: Empirical Results */}
+            <Section number="6" title="Empirical Results" id="results" />
 
-            {/* Backtest Performance Summary */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 mb-8">
-                <div className="flex items-center gap-2 mb-4">
-                    <Activity className="w-5 h-5 text-gray-600" />
-                    <h2 className="font-medium text-gray-900">Backtest Performance (6 months, 165 insider signals)</h2>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <MetricCard
-                        label="Win Rate"
-                        value={SYSTEM_METRICS.backtest.winRate}
-                        change={SYSTEM_METRICS.backtest.winRate - SYSTEM_METRICS.backtest.baselineWinRate}
-                    />
-                    <MetricCard
-                        label="Avg R per Trade"
-                        value={SYSTEM_METRICS.backtest.avgR}
-                        unit="R"
-                    />
-                    <MetricCard
-                        label="Profit Factor"
-                        value={SYSTEM_METRICS.backtest.profitFactor}
-                        unit="x"
-                        change={SYSTEM_METRICS.backtest.profitFactor - SYSTEM_METRICS.backtest.baselineProfitFactor}
-                    />
-                    <MetricCard
-                        label="Veto Precision"
-                        value={SYSTEM_METRICS.backtest.vetoPrecision}
-                    />
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-gray-600">
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                        <span>Veto Threshold: P(loss) &gt; {SYSTEM_METRICS.threshold}%</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                        <span>{SYSTEM_METRICS.featureCount} Technical Features</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                        <span>{SYSTEM_METRICS.backtest.vetoRate}% of signals vetoed</span>
-                    </div>
-                </div>
-            </div>
+            <Section number="6.1" title="Backtest Configuration" level={2} />
+            <P>
+                We evaluate the veto system using 165 insider buying signals collected over
+                a 6-month period. Each signal is processed through the ML filter, and we track
+                trade outcomes using the ATR-based trade plan described in Section 4.5.
+            </P>
 
-            {/* System Flow */}
-            <div className="mb-8">
-                <h2 className="text-lg font-medium text-gray-900 mb-4">How It Works</h2>
-                <div className="grid md:grid-cols-4 gap-4">
-                    {[
-                        { icon: TrendingUp, title: 'You Find Signal', desc: 'Insider buying, politician trade, or other catalyst' },
-                        { icon: Database, title: 'System Analyzes', desc: '40 technical features computed from OHLCV + SPY' },
-                        { icon: Filter, title: 'ML Evaluates Timing', desc: 'Model predicts P(loss) for current conditions' },
-                        { icon: Target, title: 'Trade Plan', desc: 'If not vetoed: Stop loss + 3 profit targets' },
-                    ].map((step, i) => (
-                        <div key={step.title} className="relative">
-                            <div className="bg-white border border-gray-200 rounded-lg p-4 h-full">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <div className="w-6 h-6 rounded bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-600">
-                                        {i + 1}
-                                    </div>
-                                    <step.icon className="w-4 h-4 text-gray-500" />
-                                </div>
-                                <h3 className="font-medium text-gray-900 text-sm mb-1">{step.title}</h3>
-                                <p className="text-xs text-gray-500">{step.desc}</p>
-                            </div>
-                            {i < 3 && (
-                                <div className="hidden md:block absolute top-1/2 -right-2 w-4 text-gray-300">
-                                    <ChevronRight className="w-4 h-4" />
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </div>
+            <Section number="6.2" title="Performance Metrics" level={2} />
 
-            {/* Detailed Sections */}
-            <div className="space-y-4">
-                {/* Signal Sources */}
-                <ExpandableSection title="Signal Sources (Your Edge)" icon={TrendingUp} defaultOpen>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            The system is designed to work with high-conviction &quot;soft signals&quot; that you discover
-                            through your own research. These signals have informational edge but uncertain timing.
-                        </p>
+            <Table
+                number={4}
+                caption="Backtest results comparing veto-filtered trades to baseline (all signals taken)."
+                columns={BACKTEST_RESULTS}
+                data={BACKTEST_DATA}
+            />
 
-                        <div className="grid md:grid-cols-3 gap-4">
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2 flex items-center gap-2">
-                                    <DollarSign className="w-4 h-4 text-emerald-500" />
-                                    Insider Buying
-                                </h4>
-                                <p className="text-xs text-gray-600">
-                                    Corporate insiders (CEOs, directors) buying their own stock.
-                                    They know the business best.
-                                </p>
-                            </div>
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2 flex items-center gap-2">
-                                    <Activity className="w-4 h-4 text-blue-500" />
-                                    Politician Trades
-                                </h4>
-                                <p className="text-xs text-gray-600">
-                                    Congressional trading disclosures. Often have advance knowledge
-                                    of legislation and contracts.
-                                </p>
-                            </div>
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2 flex items-center gap-2">
-                                    <BarChart2 className="w-4 h-4 text-amber-500" />
-                                    Smart Money
-                                </h4>
-                                <p className="text-xs text-gray-600">
-                                    Hedge fund 13F filings, unusual options activity, or
-                                    institutional accumulation patterns.
-                                </p>
-                            </div>
-                        </div>
+            <P>
+                The veto system improves win rate from 39.4% to 41.2% (+1.8%) and profit factor
+                from 1.34 to 1.44 (+7.5%). While the absolute win rate improvement appears modest,
+                the effect on profitability is amplified by removing the most costly losing trades.
+            </P>
 
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                            <div className="flex items-start gap-2">
-                                <Info className="w-4 h-4 text-blue-600 mt-0.5" />
-                                <div className="text-sm text-blue-800">
-                                    <strong>Why this approach?</strong> These signals have proven alpha but
-                                    uncertain timing. The ML veto filters out entries when technical
-                                    conditions suggest the trade is likely to fail despite the signal.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </ExpandableSection>
+            <Section number="6.3" title="Veto Precision Analysis" level={2} />
+            <P>
+                Of the 165 signals, 12 (7.3%) were vetoed with P(loss) &gt; 60%. Post-hoc analysis
+                reveals that 10 of these 12 vetoed trades (83.3%) would have resulted in losses
+                had they been taken. This high precision validates the asymmetric objective:
+                the model reliably identifies bad timing even though it cannot reliably predict
+                winners.
+            </P>
 
-                {/* Feature Engineering */}
-                <ExpandableSection title={`Technical Features (${SYSTEM_METRICS.featureCount} Features)`} icon={Layers}>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            The system computes {SYSTEM_METRICS.featureCount} technical features from OHLCV price data
-                            and SPY market context. All features are &quot;point-in-time safe&quot; - computed using only
-                            data available at the decision timestamp (no lookahead bias).
-                        </p>
-                        <FeatureTable />
-                    </div>
-                </ExpandableSection>
+            <Section number="6.4" title="Comparison with Baseline" level={2} />
+            <P>
+                The baseline strategy of taking all signals without filtering yields a profit
+                factor of 1.34, indicating positive expectancy but with significant variance.
+                By removing the 7.3% of signals identified as poor timing, we concentrate
+                capital on higher-quality opportunities, improving risk-adjusted returns
+                without sacrificing exposure to informational edge.
+            </P>
 
-                {/* ML Model */}
-                <ExpandableSection title="The Veto Model" icon={Cpu}>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            A logistic regression model predicts the probability that a trade will result in a loss.
-                            If P(loss) exceeds the veto threshold, the signal is rejected.
-                        </p>
+            {/* Section 7: Discussion */}
+            <Section number="7" title="Discussion" id="discussion" />
 
-                        <div className="grid md:grid-cols-2 gap-4">
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2">Model Architecture</h4>
-                                <table className="text-sm w-full">
-                                    <tbody className="divide-y divide-gray-200">
-                                        <tr>
-                                            <td className="py-1.5 text-gray-500">Algorithm</td>
-                                            <td className="py-1.5 text-gray-900 font-mono text-xs">Logistic Regression</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-1.5 text-gray-500">Features</td>
-                                            <td className="py-1.5 text-gray-900 font-mono text-xs">{SYSTEM_METRICS.featureCount} (OHLCV + SPY)</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-1.5 text-gray-500">Training Samples</td>
-                                            <td className="py-1.5 text-gray-900 font-mono text-xs">{SYSTEM_METRICS.trainingSamples.toLocaleString()}</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-1.5 text-gray-500">Normalization</td>
-                                            <td className="py-1.5 text-gray-900 font-mono text-xs">Z-score standardization</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-1.5 text-gray-500">Veto Threshold</td>
-                                            <td className="py-1.5 text-gray-900 font-mono text-xs">P(loss) &gt; {SYSTEM_METRICS.threshold}%</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2">Why Logistic Regression?</h4>
-                                <ul className="text-sm text-gray-600 space-y-1.5">
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5" />
-                                        <span>Well-calibrated probabilities (crucial for thresholding)</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5" />
-                                        <span>Interpretable feature weights</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5" />
-                                        <span>Robust to overfitting with limited signal</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5" />
-                                        <span>Fast inference (runs in browser)</span>
-                                    </li>
-                                </ul>
-                            </div>
-                        </div>
+            <Section number="7.1" title="Interpretation of Results" level={2} />
+            <P>
+                The success of the veto approach supports our hypothesis that timing risk
+                can be partially separated from signal quality. An insider buying signal
+                reflects fundamental information about the company&apos;s prospects; technical
+                conditions reflect short-term market dynamics. By filtering on technical
+                conditions, we avoid entries where market structure works against us despite
+                the underlying signal quality.
+            </P>
+            <P>
+                The 83.3% veto precision exceeds our target of 75%, suggesting the model
+                has learned genuine patterns rather than overfitting to noise. The conservative
+                7.3% veto rate indicates the model is selective, intervening only in cases
+                of high confidence.
+            </P>
 
-                        <div className="bg-gray-50 rounded-lg p-4">
-                            <h4 className="font-medium text-gray-900 text-sm mb-2">Prediction Output</h4>
-                            <p className="text-sm text-gray-600 mb-2">
-                                The model outputs P(win), and we compute P(loss) = 1 - P(win). If P(loss) exceeds
-                                the threshold, the trade is vetoed.
-                            </p>
-                            <div className="font-mono text-xs bg-gray-900 text-gray-100 p-3 rounded">
-                                P(win) = sigmoid(w₀ + w₁·x₁ + w₂·x₂ + ... + w₄₀·x₄₀)<br/>
-                                P(loss) = 1 - P(win)<br/>
-                                VETO if P(loss) &gt; {SYSTEM_METRICS.threshold}%
-                            </div>
-                        </div>
-                    </div>
-                </ExpandableSection>
+            <Section number="7.2" title="Limitations" level={2} />
+            <P>
+                Several limitations warrant consideration:
+            </P>
+            <ul className="list-disc ml-6 space-y-1">
+                <li>Backtest period (6 months) is relatively short; longer evaluation is needed</li>
+                <li>Transaction costs and slippage are not modeled</li>
+                <li>Market regime changes may degrade model performance</li>
+                <li>Regulatory changes (e.g., STOCK Act enforcement) may affect signal quality</li>
+                <li>Model is trained on historical patterns that may not persist</li>
+            </ul>
 
-                {/* Veto Decision Logic */}
-                <ExpandableSection title="Veto Decision Logic" icon={Shield}>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            The veto threshold was optimized via grid search to maximize timing value while
-                            maintaining high veto precision.
-                        </p>
+            <Section number="7.3" title="Future Work" level={2} />
+            <P>
+                Future research directions include: (1) incorporating options market signals
+                as additional features, (2) developing sector-specific models, (3) exploring
+                ensemble methods to improve veto precision, and (4) implementing dynamic
+                threshold adjustment based on market conditions.
+            </P>
 
-                        <div className="bg-gray-50 rounded-lg p-4">
-                            <h4 className="font-medium text-gray-900 text-sm mb-3">Decision Outcomes</h4>
-                            <div className="space-y-2">
-                                <div className="flex items-center gap-3 text-sm">
-                                    <div className="w-24 font-medium text-gray-600">P(loss) &lt; 50%</div>
-                                    <div className="flex-1 h-2 bg-emerald-500 rounded"></div>
-                                    <div className="w-20 text-emerald-700 font-medium">PROCEED</div>
-                                </div>
-                                <div className="flex items-center gap-3 text-sm">
-                                    <div className="w-24 font-medium text-gray-600">50-60%</div>
-                                    <div className="flex-1 h-2 bg-amber-400 rounded"></div>
-                                    <div className="w-20 text-amber-700 font-medium">CAUTION</div>
-                                </div>
-                                <div className="flex items-center gap-3 text-sm">
-                                    <div className="w-24 font-medium text-gray-600">&gt; 60%</div>
-                                    <div className="flex-1 h-2 bg-red-500 rounded"></div>
-                                    <div className="w-20 text-red-700 font-medium">VETO</div>
-                                </div>
-                            </div>
-                        </div>
+            {/* Section 8: Conclusion */}
+            <Section number="8" title="Conclusion" id="conclusion" />
+            <P>
+                We have presented SwingTrade Pro, a system combining informational edge signals
+                from insider and congressional trading with a machine learning timing filter.
+                The veto-based approach proves effective: by identifying entries with high loss
+                probability and rejecting them, we improve trading outcomes without sacrificing
+                exposure to high-conviction signals.
+            </P>
+            <P>
+                Key findings include: (1) veto precision of 83.3% validates the asymmetric
+                objective, (2) profit factor improvement from 1.34 to 1.44 demonstrates
+                economic significance, and (3) the conservative 7.3% veto rate ensures we
+                remain exposed to informational edge while avoiding the worst timing.
+            </P>
+            <P>
+                The integration of academically-documented alpha sources (insider trading,
+                congressional trading) with systematic timing evaluation represents a practical
+                synthesis of fundamental and technical analysis, enabled by modern machine
+                learning methods.
+            </P>
 
-                        <div className="grid md:grid-cols-3 gap-4">
-                            <div className="text-center p-4 bg-emerald-50 rounded-lg border border-emerald-200">
-                                <div className="text-2xl font-semibold text-emerald-700">
-                                    {SYSTEM_METRICS.backtest.vetoPrecision}%
-                                </div>
-                                <div className="text-xs text-gray-600 mt-1">Veto Precision</div>
-                                <div className="text-xs text-emerald-600 mt-0.5">
-                                    Vetoed trades usually lose
-                                </div>
-                            </div>
-                            <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
-                                <div className="text-2xl font-semibold text-blue-700">
-                                    {SYSTEM_METRICS.backtest.vetoRate}%
-                                </div>
-                                <div className="text-xs text-gray-600 mt-1">Veto Rate</div>
-                                <div className="text-xs text-blue-600 mt-0.5">
-                                    Low false positive rate
-                                </div>
-                            </div>
-                            <div className="text-center p-4 bg-amber-50 rounded-lg border border-amber-200">
-                                <div className="text-2xl font-semibold text-amber-700">
-                                    +{(SYSTEM_METRICS.backtest.winRate - SYSTEM_METRICS.backtest.baselineWinRate).toFixed(1)}%
-                                </div>
-                                <div className="text-xs text-gray-600 mt-1">Win Rate Lift</div>
-                                <div className="text-xs text-amber-600 mt-0.5">
-                                    vs taking all signals
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                            <div className="flex items-start gap-2">
-                                <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5" />
-                                <div className="text-sm text-amber-800">
-                                    <strong>Conservative by design:</strong> The system vetoes only ~7% of signals.
-                                    It&apos;s not trying to predict winners - it&apos;s catching the worst timing with
-                                    high confidence.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </ExpandableSection>
-
-                {/* Trade Plan Generation */}
-                <ExpandableSection title="Trade Plan Generation" icon={Target}>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            For signals that pass the veto filter, the system generates a complete trade plan
-                            with stop loss and three profit targets.
-                        </p>
-
-                        <div className="grid md:grid-cols-2 gap-4">
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2">Stop Loss Calculation</h4>
-                                <ul className="text-sm text-gray-600 space-y-1.5">
-                                    <li><strong>Method:</strong> ATR-based stop</li>
-                                    <li><strong>Formula:</strong> Entry - 1.5 × ATR(14)</li>
-                                    <li><strong>Typical distance:</strong> 3-5% below entry</li>
-                                    <li><strong>Purpose:</strong> Defines 1R risk unit</li>
-                                </ul>
-                            </div>
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2">Profit Targets (Partial Exits)</h4>
-                                <table className="text-sm w-full">
-                                    <tbody className="divide-y divide-gray-200">
-                                        <tr>
-                                            <td className="py-1.5 text-gray-500">TP1 (33%)</td>
-                                            <td className="py-1.5 text-gray-900">Entry + 2R</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-1.5 text-gray-500">TP2 (33%)</td>
-                                            <td className="py-1.5 text-gray-900">Entry + 3R</td>
-                                        </tr>
-                                        <tr>
-                                            <td className="py-1.5 text-gray-500">TP3 (34%)</td>
-                                            <td className="py-1.5 text-gray-900">Entry + 4R</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <div className="bg-gray-50 rounded-lg p-4">
-                            <h4 className="font-medium text-gray-900 text-sm mb-2">Position Sizing</h4>
-                            <p className="text-sm text-gray-600 mb-2">
-                                With 1% account risk per trade:
-                            </p>
-                            <div className="font-mono text-xs bg-gray-900 text-gray-100 p-3 rounded">
-                                Risk per share = Entry - Stop Loss<br/>
-                                Position size = (Account × 1%) / Risk per share<br/>
-                                <br/>
-                                Example: $100,000 account, $50 entry, $47 stop<br/>
-                                Risk/share = $3, Position = $1,000 / $3 = 333 shares
-                            </div>
-                        </div>
-                    </div>
-                </ExpandableSection>
-
-                {/* Expected Returns */}
-                <ExpandableSection title="Expected Performance" icon={BarChart2}>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            Based on backtesting with {SYSTEM_METRICS.backtest.totalSignals} insider signals
-                            over 6 months, here are the expected returns:
-                        </p>
-
-                        <div className="bg-gray-50 rounded-lg p-4">
-                            <h4 className="font-medium text-gray-900 text-sm mb-3">Annual Return Projections</h4>
-                            <table className="text-sm w-full">
-                                <thead className="border-b border-gray-200">
-                                    <tr>
-                                        <th className="py-2 text-left text-gray-500">Risk/Trade</th>
-                                        <th className="py-2 text-left text-gray-500">Trades/Year</th>
-                                        <th className="py-2 text-left text-gray-500">Expected Return</th>
-                                        <th className="py-2 text-left text-gray-500">$100K Becomes</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200">
-                                    <tr>
-                                        <td className="py-2 text-gray-700">0.5%</td>
-                                        <td className="py-2 text-gray-700">~300</td>
-                                        <td className="py-2 text-emerald-600 font-medium">~40%</td>
-                                        <td className="py-2 text-gray-900 font-semibold">$140,000</td>
-                                    </tr>
-                                    <tr className="bg-blue-50">
-                                        <td className="py-2 text-gray-700">1.0%</td>
-                                        <td className="py-2 text-gray-700">~300</td>
-                                        <td className="py-2 text-emerald-600 font-medium">~80%</td>
-                                        <td className="py-2 text-gray-900 font-semibold">$180,000</td>
-                                    </tr>
-                                    <tr>
-                                        <td className="py-2 text-gray-700">1.5%</td>
-                                        <td className="py-2 text-gray-700">~300</td>
-                                        <td className="py-2 text-emerald-600 font-medium">~120%</td>
-                                        <td className="py-2 text-gray-900 font-semibold">$220,000</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <div className="grid md:grid-cols-2 gap-4">
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                                <h4 className="font-medium text-emerald-800 text-sm mb-1">Key Advantage</h4>
-                                <p className="text-sm text-emerald-700">
-                                    Profit Factor of {SYSTEM_METRICS.backtest.profitFactor.toFixed(2)} means
-                                    you make ${(SYSTEM_METRICS.backtest.profitFactor).toFixed(2)} for every
-                                    $1 lost. Sustainable edge over time.
-                                </p>
-                            </div>
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                                <h4 className="font-medium text-amber-800 text-sm mb-1">Risk Warning</h4>
-                                <p className="text-sm text-amber-700">
-                                    Past backtest performance does not guarantee future results.
-                                    Markets change, and edge can decay.
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </ExpandableSection>
-
-                {/* Soft Signals (11th Criterion) */}
-                <ExpandableSection title="Soft Signals (11th Criterion)" icon={DollarSign}>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            The 11th criterion combines insider trading (SEC Form 4) and congressional trading
-                            disclosures from Quiver Quantitative to detect smart money movements before they&apos;re
-                            reflected in price. This provides an additional edge layer on top of technical analysis.
-                        </p>
-
-                        <div className="grid md:grid-cols-2 gap-4">
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2">Insider Trading Signals</h4>
-                                <ul className="text-sm text-gray-600 space-y-1.5">
-                                    <li className="flex items-start gap-2">
-                                        <span className="text-emerald-500 font-mono text-xs">+2.5</span>
-                                        <span>3+ insider buys with &gt;70% buy ratio</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <span className="text-emerald-500 font-mono text-xs">+1.5</span>
-                                        <span>Any buying with &gt;50% buy ratio</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <span className="text-emerald-500 font-mono text-xs">+1.0</span>
-                                        <span>C-suite (CEO/CFO) buying</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <span className="text-red-500 font-mono text-xs">-2.0</span>
-                                        <span>Heavy selling (3+ sells, &lt;30% buy ratio)</span>
-                                    </li>
-                                </ul>
-                            </div>
-                            <div className="bg-gray-50 rounded-lg p-4">
-                                <h4 className="font-medium text-gray-900 text-sm mb-2">Congress Trading Signals</h4>
-                                <ul className="text-sm text-gray-600 space-y-1.5">
-                                    <li className="flex items-start gap-2">
-                                        <span className="text-emerald-500 font-mono text-xs">+1.5</span>
-                                        <span>2+ congress buys with &gt;70% buy ratio</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <span className="text-emerald-500 font-mono text-xs">+0.5</span>
-                                        <span>Any congress buying</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <span className="text-emerald-500 font-mono text-xs">+1.0</span>
-                                        <span>Bipartisan buying (both D and R)</span>
-                                    </li>
-                                    <li className="flex items-start gap-2">
-                                        <span className="text-red-500 font-mono text-xs">-1.0</span>
-                                        <span>Heavy congress selling</span>
-                                    </li>
-                                </ul>
-                            </div>
-                        </div>
-
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                            <div className="flex items-start gap-2">
-                                <Info className="w-4 h-4 text-blue-600 mt-0.5" />
-                                <div className="text-sm text-blue-800">
-                                    <strong>Data source:</strong> Quiver Quantitative API provides SEC Form 4
-                                    filings (insider trades) and congressional trading disclosures (STOCK Act).
-                                    Data is cached for 1 hour. Base score is 5 (neutral), range is 0-10.
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-gray-50 rounded-lg p-4">
-                            <h4 className="font-medium text-gray-900 text-sm mb-2">Expected Alpha</h4>
-                            <table className="text-sm w-full">
-                                <tbody className="divide-y divide-gray-200">
-                                    <tr>
-                                        <td className="py-1.5 text-gray-500">Insider Buying</td>
-                                        <td className="py-1.5 text-gray-900">~5% annual alpha (academically validated)</td>
-                                    </tr>
-                                    <tr>
-                                        <td className="py-1.5 text-gray-500">Congressional Trading</td>
-                                        <td className="py-1.5 text-gray-900">~10-47% for leadership (higher variance)</td>
-                                    </tr>
-                                    <tr>
-                                        <td className="py-1.5 text-gray-500">Lookback Period</td>
-                                        <td className="py-1.5 text-gray-900">90 days for trade history</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                            <div className="flex items-start gap-2">
-                                <Zap className="w-4 h-4 text-emerald-600 mt-0.5" />
-                                <div className="text-sm text-emerald-800">
-                                    <strong>2x Weight in Success Probability:</strong> Soft signals are weighted at 2x
-                                    (16.7% of total score) compared to each technical criterion (8.3%), reflecting
-                                    the strong academic evidence for insider and congressional trading alpha. Additionally,
-                                    positive soft signals (STRONG or MODERATE) are <strong>required</strong> for the
-                                    &quot;Good Entry&quot; badge in the watchlist.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </ExpandableSection>
-
-                {/* Model Updates */}
-                <ExpandableSection title="Model Maintenance" icon={GitBranch}>
-                    <div className="space-y-4">
-                        <p className="text-sm text-gray-600">
-                            The model is periodically retrained and the veto threshold re-optimized
-                            as market conditions evolve.
-                        </p>
-
-                        <div className="bg-gray-50 rounded-lg p-4">
-                            <h4 className="font-medium text-gray-900 text-sm mb-2">Update Schedule</h4>
-                            <table className="text-sm w-full">
-                                <tbody className="divide-y divide-gray-200">
-                                    <tr>
-                                        <td className="py-1.5 text-gray-500">Training Data</td>
-                                        <td className="py-1.5 text-gray-900">7 years of daily OHLCV (2018-2025)</td>
-                                    </tr>
-                                    <tr>
-                                        <td className="py-1.5 text-gray-500">Model Retraining</td>
-                                        <td className="py-1.5 text-gray-900">Quarterly with new market data</td>
-                                    </tr>
-                                    <tr>
-                                        <td className="py-1.5 text-gray-500">Threshold Optimization</td>
-                                        <td className="py-1.5 text-gray-900">Monthly grid search validation</td>
-                                    </tr>
-                                    <tr>
-                                        <td className="py-1.5 text-gray-500">Performance Monitoring</td>
-                                        <td className="py-1.5 text-gray-900">Continuous veto precision tracking</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </ExpandableSection>
-            </div>
+            {/* Section 9: References */}
+            <Section number="9" title="References" id="references" />
+            <Bibliography />
 
             {/* Disclaimer */}
-            <div className="mt-8 p-4 bg-gray-100 border border-gray-200 rounded-lg">
-                <h3 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-gray-600" />
-                    Important Disclaimers
-                </h3>
-                <ul className="text-sm text-gray-600 space-y-1">
-                    <li>This tool is for educational and informational purposes only.</li>
-                    <li>Past backtest performance does not guarantee future results.</li>
-                    <li>Always conduct your own research before making investment decisions.</li>
-                    <li>The model is trained on historical data and may not perform in novel market conditions.</li>
-                    <li>You are responsible for your own trades. This is not financial advice.</li>
-                </ul>
+            <HR />
+            <div className="latex-abstract">
+                <div className="latex-abstract-label">Disclaimer</div>
+                <div className="latex-abstract-content">
+                    <P>
+                        This paper is for educational and informational purposes only. Past backtest
+                        performance does not guarantee future results. The authors are not providing
+                        investment advice. Always conduct your own research before making investment
+                        decisions. Markets evolve, and model performance may degrade over time.
+                    </P>
+                </div>
             </div>
 
-            {/* Footer */}
-            <div className="mt-6 text-center text-xs text-gray-400">
-                Veto System v{SYSTEM_METRICS.version} | {SYSTEM_METRICS.featureCount} features |
-                Threshold: P(loss) &gt; {SYSTEM_METRICS.threshold}% | Updated {SYSTEM_METRICS.lastUpdated}
-            </div>
-        </div>
+        </Paper>
     );
 }

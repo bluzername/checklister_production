@@ -1,0 +1,298 @@
+/* LaTeX-style Academic Paper Styles */
+
+/* Computer Modern-like fonts */
+@import url('https://cdn.jsdelivr.net/gh/aaaakshat/cm-web-fonts@latest/fonts.css');
+
+/* Paper container */
+.latex-paper {
+  font-family: 'Computer Modern Serif', 'Latin Modern Roman', 'CMU Serif', Georgia, 'Times New Roman', serif;
+  font-size: 11pt;
+  line-height: 1.6;
+  color: #1a1a1a;
+  background-color: #fffef9;
+  max-width: 8.5in;
+  margin: 0 auto;
+  padding: 1in 1.25in;
+}
+
+/* Title block */
+.latex-title {
+  text-align: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 0.5pt solid #333;
+}
+
+.latex-title h1 {
+  font-size: 17pt;
+  font-weight: normal;
+  margin-bottom: 0.75rem;
+  line-height: 1.3;
+}
+
+.latex-title .authors {
+  font-size: 12pt;
+  margin-bottom: 0.25rem;
+}
+
+.latex-title .affiliation {
+  font-size: 10pt;
+  font-style: italic;
+  color: #444;
+}
+
+.latex-title .date {
+  font-size: 10pt;
+  margin-top: 0.5rem;
+}
+
+/* Abstract */
+.latex-abstract {
+  margin: 1.5rem 0 2rem;
+  padding: 0 2rem;
+}
+
+.latex-abstract-label {
+  font-weight: bold;
+  font-size: 11pt;
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.latex-abstract-content {
+  font-size: 10pt;
+  text-align: justify;
+  line-height: 1.5;
+}
+
+/* Section headings */
+.latex-section {
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.latex-section-1 {
+  font-size: 14pt;
+  font-weight: bold;
+}
+
+.latex-section-2 {
+  font-size: 12pt;
+  font-weight: bold;
+}
+
+.latex-section-3 {
+  font-size: 11pt;
+  font-weight: bold;
+  font-style: italic;
+}
+
+.latex-section-number {
+  margin-right: 0.5em;
+}
+
+/* Paragraphs */
+.latex-paper p {
+  text-align: justify;
+  text-indent: 1.5em;
+  margin: 0 0 0.5rem 0;
+  hyphens: auto;
+}
+
+.latex-paper p:first-of-type,
+.latex-paper .latex-section + p {
+  text-indent: 0;
+}
+
+/* Equations */
+.latex-equation {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 1rem 0;
+  position: relative;
+}
+
+.latex-equation-content {
+  font-family: 'Computer Modern Serif', 'Latin Modern Math', Georgia, serif;
+  font-size: 11pt;
+  font-style: italic;
+}
+
+.latex-equation-number {
+  position: absolute;
+  right: 0;
+  font-size: 10pt;
+}
+
+/* Tables */
+.latex-table-container {
+  margin: 1rem 0;
+  overflow-x: auto;
+}
+
+.latex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10pt;
+}
+
+.latex-table caption {
+  text-align: left;
+  font-size: 10pt;
+  margin-bottom: 0.5rem;
+}
+
+.latex-table caption .table-label {
+  font-weight: bold;
+}
+
+.latex-table thead {
+  border-top: 1.5pt solid #1a1a1a;
+  border-bottom: 0.75pt solid #1a1a1a;
+}
+
+.latex-table tbody {
+  border-bottom: 1.5pt solid #1a1a1a;
+}
+
+.latex-table th,
+.latex-table td {
+  padding: 0.35rem 0.75rem;
+  text-align: left;
+}
+
+.latex-table th {
+  font-weight: bold;
+}
+
+.latex-table td.numeric,
+.latex-table th.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Citations */
+.latex-cite {
+  color: #1a365d;
+}
+
+.latex-cite:hover {
+  text-decoration: underline;
+}
+
+/* Bibliography */
+.latex-bibliography {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 0.5pt solid #333;
+}
+
+.latex-bibliography h2 {
+  font-size: 14pt;
+  font-weight: bold;
+  margin-bottom: 1rem;
+}
+
+.latex-bib-entry {
+  display: flex;
+  margin-bottom: 0.75rem;
+  font-size: 10pt;
+  line-height: 1.4;
+}
+
+.latex-bib-number {
+  min-width: 2rem;
+  font-weight: bold;
+}
+
+.latex-bib-content {
+  flex: 1;
+}
+
+.latex-bib-authors {
+  font-variant: small-caps;
+}
+
+.latex-bib-title {
+  font-style: italic;
+}
+
+.latex-bib-journal {
+  font-style: normal;
+}
+
+/* Theorem/Definition boxes */
+.latex-theorem {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 2pt solid #1a365d;
+  background-color: #f8f9fa;
+}
+
+.latex-theorem-header {
+  font-weight: bold;
+  font-style: italic;
+  margin-bottom: 0.25rem;
+}
+
+/* Figure */
+.latex-figure {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+.latex-figure-caption {
+  font-size: 10pt;
+  margin-top: 0.5rem;
+  text-align: left;
+}
+
+.latex-figure-label {
+  font-weight: bold;
+}
+
+/* Lists */
+.latex-paper ul,
+.latex-paper ol {
+  margin: 0.5rem 0;
+  padding-left: 2rem;
+}
+
+.latex-paper li {
+  margin-bottom: 0.25rem;
+}
+
+/* Horizontal rule */
+.latex-hr {
+  border: none;
+  border-top: 0.5pt solid #666;
+  margin: 1.5rem 0;
+}
+
+/* Keywords */
+.latex-keywords {
+  font-size: 10pt;
+  margin-top: 0.5rem;
+}
+
+.latex-keywords-label {
+  font-weight: bold;
+  font-style: italic;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .latex-paper {
+    padding: 1rem;
+    font-size: 10pt;
+  }
+
+  .latex-title h1 {
+    font-size: 14pt;
+  }
+
+  .latex-abstract {
+    padding: 0 0.5rem;
+  }
+}
