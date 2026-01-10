@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Trash2, Loader2, Sparkles, RefreshCw, Calendar } from 'lucide-react';
+import { Trash2, Loader2, Sparkles, RefreshCw, Calendar, AlertTriangle, Ban } from 'lucide-react';
 import { WatchlistItem } from '@/lib/types';
 import { removeFromWatchlist, updateWatchlistDate } from '@/app/watchlist-actions';
 
@@ -118,6 +118,16 @@ export function WatchlistRow({ item, onDelete, onSelect, onDateUpdate }: Watchli
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
                         <Sparkles className="w-3.5 h-3.5" />
                         GOOD ENTRY
+                    </span>
+                ) : item.analysis?.veto_analysis?.verdict === 'VETO' ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-full bg-red-100 text-red-700 border border-red-200">
+                        <Ban className="w-3.5 h-3.5" />
+                        POOR TIMING
+                    </span>
+                ) : item.analysis?.veto_analysis?.verdict === 'CAUTION' ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        CAUTION
                     </span>
                 ) : item.score !== undefined ? (
                     <span className="text-gray-400 text-sm">Watching</span>

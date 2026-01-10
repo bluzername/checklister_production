@@ -178,18 +178,31 @@ export async function removeFromWatchlist(id: string): Promise<{ success: boolea
 }
 
 function isGoodEntry(analysis: AnalysisResult): boolean {
-    // Good entry if score is high and price is near support
-    const { success_probability, parameters, current_price } = analysis;
+    // Good entry requires:
+    // 1. High technical score
+    // 2. Price near support OR very high score
+    // 3. NOT vetoed by ML timing model
+    const { success_probability, parameters, current_price, veto_analysis } = analysis;
     const supportZones = parameters['6_support_resistance'].support_zones;
-    
+
+    // CRITICAL: Check veto first - if ML says bad timing, it's not a good entry
+    if (veto_analysis?.vetoed || veto_analysis?.verdict === 'VETO') {
+        return false;
+    }
+
+    // Also reject if ML shows high loss probability (>55% even without explicit veto)
+    if (veto_analysis?.pLoss && veto_analysis.pLoss > 0.55) {
+        return false;
+    }
+
     if (success_probability < 70) return false;
-    
+
     // Check if current price is within 3% of any support zone
     const nearSupport = supportZones.some(support => {
         const diff = Math.abs(current_price - support) / support;
         return diff <= 0.03;
     });
-    
+
     return nearSupport || success_probability >= 80;
 }
 
