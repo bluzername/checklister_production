@@ -27,8 +27,8 @@ import {
 // ============================================
 
 const SYSTEM_METRICS = {
-    version: '3.0.0',
-    lastUpdated: '2024-12-18',
+    version: '3.1.0',
+    lastUpdated: '2025-01-10',
     modelType: 'Veto-Based ML Filter',
     featureCount: 40,
     trainingSamples: 50096,
@@ -666,6 +666,106 @@ export function MethodologyTab() {
                                     Past backtest performance does not guarantee future results.
                                     Markets change, and edge can decay.
                                 </p>
+                            </div>
+                        </div>
+                    </div>
+                </ExpandableSection>
+
+                {/* Soft Signals (11th Criterion) */}
+                <ExpandableSection title="Soft Signals (11th Criterion)" icon={DollarSign}>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            The 11th criterion combines insider trading (SEC Form 4) and congressional trading
+                            disclosures from Quiver Quantitative to detect smart money movements before they&apos;re
+                            reflected in price. This provides an additional edge layer on top of technical analysis.
+                        </p>
+
+                        <div className="grid md:grid-cols-2 gap-4">
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2">Insider Trading Signals</h4>
+                                <ul className="text-sm text-gray-600 space-y-1.5">
+                                    <li className="flex items-start gap-2">
+                                        <span className="text-emerald-500 font-mono text-xs">+2.5</span>
+                                        <span>3+ insider buys with &gt;70% buy ratio</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <span className="text-emerald-500 font-mono text-xs">+1.5</span>
+                                        <span>Any buying with &gt;50% buy ratio</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <span className="text-emerald-500 font-mono text-xs">+1.0</span>
+                                        <span>C-suite (CEO/CFO) buying</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <span className="text-red-500 font-mono text-xs">-2.0</span>
+                                        <span>Heavy selling (3+ sells, &lt;30% buy ratio)</span>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 text-sm mb-2">Congress Trading Signals</h4>
+                                <ul className="text-sm text-gray-600 space-y-1.5">
+                                    <li className="flex items-start gap-2">
+                                        <span className="text-emerald-500 font-mono text-xs">+1.5</span>
+                                        <span>2+ congress buys with &gt;70% buy ratio</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <span className="text-emerald-500 font-mono text-xs">+0.5</span>
+                                        <span>Any congress buying</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <span className="text-emerald-500 font-mono text-xs">+1.0</span>
+                                        <span>Bipartisan buying (both D and R)</span>
+                                    </li>
+                                    <li className="flex items-start gap-2">
+                                        <span className="text-red-500 font-mono text-xs">-1.0</span>
+                                        <span>Heavy congress selling</span>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <div className="flex items-start gap-2">
+                                <Info className="w-4 h-4 text-blue-600 mt-0.5" />
+                                <div className="text-sm text-blue-800">
+                                    <strong>Data source:</strong> Quiver Quantitative API provides SEC Form 4
+                                    filings (insider trades) and congressional trading disclosures (STOCK Act).
+                                    Data is cached for 1 hour. Base score is 5 (neutral), range is 0-10.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <h4 className="font-medium text-gray-900 text-sm mb-2">Expected Alpha</h4>
+                            <table className="text-sm w-full">
+                                <tbody className="divide-y divide-gray-200">
+                                    <tr>
+                                        <td className="py-1.5 text-gray-500">Insider Buying</td>
+                                        <td className="py-1.5 text-gray-900">~5% annual alpha (academically validated)</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-1.5 text-gray-500">Congressional Trading</td>
+                                        <td className="py-1.5 text-gray-900">~10-47% for leadership (higher variance)</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-1.5 text-gray-500">Lookback Period</td>
+                                        <td className="py-1.5 text-gray-900">90 days for trade history</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                            <div className="flex items-start gap-2">
+                                <Zap className="w-4 h-4 text-emerald-600 mt-0.5" />
+                                <div className="text-sm text-emerald-800">
+                                    <strong>2x Weight in Success Probability:</strong> Soft signals are weighted at 2x
+                                    (16.7% of total score) compared to each technical criterion (8.3%), reflecting
+                                    the strong academic evidence for insider and congressional trading alpha. Additionally,
+                                    positive soft signals (STRONG or MODERATE) are <strong>required</strong> for the
+                                    &quot;Good Entry&quot; badge in the watchlist.
+                                </div>
                             </div>
                         </div>
                     </div>

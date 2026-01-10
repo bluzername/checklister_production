@@ -83,8 +83,18 @@ export function WatchlistRow({ item, onDelete, onSelect, onDateUpdate }: Watchli
         return 'text-red-700';
     };
 
+    const getSoftSignalColor = (strength: string | undefined) => {
+        switch (strength) {
+            case 'STRONG': return 'text-emerald-600 bg-emerald-50';
+            case 'MODERATE': return 'text-blue-600 bg-blue-50';
+            case 'WEAK': return 'text-gray-500 bg-gray-50';
+            default: return 'text-gray-400 bg-gray-50';
+        }
+    };
+
     const days = item.days_in_watchlist ?? 0;
     const percent = item.staleness_percent ?? 0;
+    const softSignals = item.analysis?.parameters['11_soft_signals'];
 
     return (
         <tr
@@ -111,6 +121,22 @@ export function WatchlistRow({ item, onDelete, onSelect, onDateUpdate }: Watchli
                     </span>
                 ) : (
                     <span className="text-gray-400 text-sm">Analyzing...</span>
+                )}
+            </td>
+            <td className="px-4 py-3 text-center">
+                {softSignals ? (
+                    <div className="flex flex-col items-center">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${getSoftSignalColor(softSignals.signal_strength)}`}>
+                            {softSignals.signal_strength || 'NONE'}
+                        </span>
+                        {softSignals.insider_buys > 0 && (
+                            <span className="text-xs text-gray-500 mt-0.5">
+                                {softSignals.insider_buys} insider {softSignals.insider_buys === 1 ? 'buy' : 'buys'}
+                            </span>
+                        )}
+                    </div>
+                ) : (
+                    <span className="text-gray-400 text-xs">--</span>
                 )}
             </td>
             <td className="px-4 py-3">

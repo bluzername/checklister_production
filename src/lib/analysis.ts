@@ -9,6 +9,7 @@ import {
 } from './types';
 import { getFundamentals, FundamentalsData } from './data-services/fmp';
 import { analyzeSentiment, SentimentData } from './data-services/sentiment';
+import { getSoftSignals, getEmptySoftSignals, SoftSignalsData } from './data-services/quiver';
 import { withLogging } from './data-services/logger';
 import {
     getHistoricalPrices,
@@ -453,8 +454,9 @@ export function calculateSuccessProbability(
     result?: Partial<AnalysisResult>,
     useModel: boolean = true
 ): number {
-    // Fallback heuristic: simple weighted sum of scores
-    const scores = [
+    // Fallback heuristic: weighted sum of scores
+    // Soft signals get 2x weight due to strong academic evidence for alpha
+    const technicalScores = [
         parameters["1_market_condition"].score,
         parameters["2_sector_condition"].score,
         parameters["3_company_condition"].score,
@@ -466,9 +468,12 @@ export function calculateSuccessProbability(
         parameters["9_ma_fibonacci"].score,
         parameters["10_rsi"].score,
     ];
+    const softSignalScore = parameters["11_soft_signals"].score;
 
-    const totalScore = scores.reduce((a, b) => a + b, 0);
-    const heuristicProbability = totalScore;
+    // 10 technical criteria (max 100) + soft signals at 2x weight (max 20) = max 120
+    const totalScore = technicalScores.reduce((a, b) => a + b, 0) + (softSignalScore * 2);
+    const maxScore = 120; // 10 criteria * 10 + 1 criterion * 10 * 2
+    const heuristicProbability = (totalScore / maxScore) * 100;
 
     // If model usage is disabled or no result to extract features from, use heuristic
     if (!useModel || !result) {
@@ -604,7 +609,7 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
 
     // Fetch additional market data and premium data services in parallel
     // Pass asOfDate for point-in-time analysis
-    const [marketData, vixLevel, fundamentals, sentiment, regimeAnalysis, spyChartData] = await Promise.all([
+    const [marketData, vixLevel, fundamentals, sentiment, regimeAnalysis, spyChartData, softSignals] = await Promise.all([
         fetchMarketData(asOfDate),
         fetchVIXLevel(asOfDate),
         getFundamentals(ticker, asOfDate), // PIT safety: pass asOfDate for backtesting
@@ -621,7 +626,9 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
         }) : analyzeSentiment(ticker),
         detectMarketRegime(asOfDate),
         // Fetch SPY OHLCV data for veto model features
-        getHistoricalPrices('SPY', startDate, endDate)
+        getHistoricalPrices('SPY', startDate, endDate),
+        // Fetch soft signals (insider + congress trades) - skip for backtests (historical data not available)
+        isBacktest ? Promise.resolve(getEmptySoftSignals()) : getSoftSignals(ticker)
     ]);
     
     // Get regime-adjusted thresholds
@@ -1061,6 +1068,23 @@ export async function analyzeTicker(ticker: string, asOfDate?: Date): Promise<An
             optimal_range: optimalRange,
             score: Math.round(rsiScore * 10) / 10,
             rationale: `RSI ${Math.round(rsi)} | Zone: ${adaptiveRSI.zone} | Thresholds: ${adaptiveRSI.thresholds.oversold}-${adaptiveRSI.thresholds.overbought} (${adaptiveRSI.isVolatile ? 'Volatile' : 'Normal'})${divergenceAnalysis.strongest.type !== 'NONE' ? ` | ${divergenceAnalysis.strongest.type.replace('_', ' ')} divergence` : ''}`
+        },
+        "11_soft_signals": {
+            insider_buys: softSignals.insider_buys_count,
+            insider_sells: softSignals.insider_sells_count,
+            insider_buy_ratio: softSignals.insider_buy_ratio,
+            insider_net_value: softSignals.insider_net_value,
+            insider_top_buyer: softSignals.insider_top_buyer,
+            insider_recent: softSignals.insider_recent_activity,
+            congress_buys: softSignals.congress_buys_count,
+            congress_sells: softSignals.congress_sells_count,
+            congress_bipartisan: softSignals.congress_bipartisan,
+            congress_recent: softSignals.congress_recent_activity,
+            signal_strength: softSignals.signal_strength,
+            score: Math.round(softSignals.combined_score * 10) / 10,
+            rationale: softSignals.data_available
+                ? `Insider: ${softSignals.insider_buys_count} buys / ${softSignals.insider_sells_count} sells | Congress: ${softSignals.congress_buys_count} buys${softSignals.congress_bipartisan ? ' (bipartisan)' : ''} | Strength: ${softSignals.signal_strength}`
+                : 'Quiver API not configured'
         }
     };
 

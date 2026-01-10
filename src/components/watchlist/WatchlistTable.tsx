@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Loader2, RefreshCw, Eye, Sparkles, ChevronUp, ChevronDown, ChevronsUpDown, AlertTriangle } from 'lucide-react';
+import { Loader2, RefreshCw, Eye, Sparkles, ChevronUp, ChevronDown, ChevronsUpDown, AlertTriangle, Filter } from 'lucide-react';
 import { WatchlistItem } from '@/lib/types';
 import { analyzeWatchlist } from '@/app/watchlist-actions';
 import { AddWatchlistForm } from './AddWatchlistForm';
@@ -24,6 +24,7 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
     const [sortColumn, setSortColumn] = useState<SortColumn>('date_added');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
     const [expiringCount, setExpiringCount] = useState(0);
+    const [filterBySoftSignals, setFilterBySoftSignals] = useState(false);
 
     // Handle column header click for sorting
     const handleSort = (column: SortColumn) => {
@@ -37,9 +38,19 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
         }
     };
 
-    // Sort items based on current sort state
+    // Filter by soft signals first, then sort
+    const filteredItems = useMemo(() => {
+        if (!filterBySoftSignals) return items;
+        return items.filter(item => {
+            const signals = item.analysis?.parameters['11_soft_signals'];
+            return signals?.signal_strength === 'STRONG' ||
+                   signals?.signal_strength === 'MODERATE';
+        });
+    }, [items, filterBySoftSignals]);
+
+    // Sort filtered items
     const sortedItems = useMemo(() => {
-        const sorted = [...items].sort((a, b) => {
+        const sorted = [...filteredItems].sort((a, b) => {
             let comparison = 0;
 
             switch (sortColumn) {
@@ -66,7 +77,15 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
         });
 
         return sorted;
-    }, [items, sortColumn, sortDirection]);
+    }, [filteredItems, sortColumn, sortDirection]);
+
+    // Count positive soft signals
+    const positiveSignalsCount = useMemo(() => {
+        return items.filter(item => {
+            const signals = item.analysis?.parameters['11_soft_signals'];
+            return signals?.signal_strength === 'STRONG' || signals?.signal_strength === 'MODERATE';
+        }).length;
+    }, [items]);
 
     // Render sort icon for column header
     const SortIcon = ({ column }: { column: SortColumn }) => {
@@ -113,7 +132,7 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
         }
     }, []);
 
-    const goodEntryCount = items.filter(i => i.is_good_entry).length;
+    const goodEntryCount = sortedItems.filter(i => i.is_good_entry).length;
 
     if (loading) {
         return (
@@ -128,14 +147,27 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
             {/* Header */}
             <div className="flex items-center justify-between">
                 <AddWatchlistForm onSuccess={handleAddItem} />
-                <button
-                    onClick={handleRefresh}
-                    disabled={refreshing}
-                    className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
-                >
-                    <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                    Refresh
-                </button>
+                <div className="flex items-center gap-4">
+                    {/* Soft Signal Filter Toggle */}
+                    <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={filterBySoftSignals}
+                            onChange={(e) => setFilterBySoftSignals(e.target.checked)}
+                            className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
+                        />
+                        <Filter className="w-4 h-4" />
+                        <span>Only positive signals ({positiveSignalsCount})</span>
+                    </label>
+                    <button
+                        onClick={handleRefresh}
+                        disabled={refreshing}
+                        className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </button>
+                </div>
             </div>
 
             {/* Good Entry Alert */}
@@ -217,12 +249,15 @@ export function WatchlistTable({ onSelectItem }: WatchlistTableProps) {
                                         <SortIcon column="score" />
                                     </div>
                                 </th>
+                                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                    Soft Signals
+                                </th>
                                 <th
                                     className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none"
                                     onClick={() => handleSort('signal')}
                                 >
                                     <div className="flex items-center gap-1">
-                                        Signal
+                                        Entry
                                         <SortIcon column="signal" />
                                     </div>
                                 </th>

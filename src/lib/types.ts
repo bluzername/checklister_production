@@ -135,6 +135,23 @@ export interface RSI extends ParameterScore {
   optimal_range: boolean;       // RSI between 45-70
 }
 
+// 11. Soft Signals (Insider + Congress Trades from Quiver Quantitative)
+export type SoftSignalStrength = 'STRONG' | 'MODERATE' | 'WEAK' | 'NONE';
+
+export interface SoftSignals extends ParameterScore {
+  insider_buys: number;
+  insider_sells: number;
+  insider_buy_ratio: number;
+  insider_net_value: number;
+  insider_top_buyer: string | null;
+  insider_recent: boolean;      // Activity in last 30 days
+  congress_buys: number;
+  congress_sells: number;
+  congress_bipartisan: boolean; // Both parties buying
+  congress_recent: boolean;     // Activity in last 30 days
+  signal_strength: SoftSignalStrength;
+}
+
 export interface AnalysisParameters {
   "1_market_condition": MarketCondition;
   "2_sector_condition": SectorCondition;
@@ -146,6 +163,7 @@ export interface AnalysisParameters {
   "8_volume": Volume;
   "9_ma_fibonacci": MAFibonacci;
   "10_rsi": RSI;
+  "11_soft_signals": SoftSignals;
 }
 
 export interface TakeProfitLevel {

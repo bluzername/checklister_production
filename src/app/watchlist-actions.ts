@@ -178,12 +178,14 @@ export async function removeFromWatchlist(id: string): Promise<{ success: boolea
 }
 
 function isGoodEntry(analysis: AnalysisResult): boolean {
-    // Good entry requires:
-    // 1. High technical score
-    // 2. Price near support OR very high score
+    // Good entry requires ALL of:
+    // 1. High technical score (>=70%)
+    // 2. Price near support OR very high score (>=80%)
     // 3. NOT vetoed by ML timing model
+    // 4. Positive soft signals (insider/congress buying)
     const { success_probability, parameters, current_price, veto_analysis } = analysis;
     const supportZones = parameters['6_support_resistance'].support_zones;
+    const softSignals = parameters['11_soft_signals'];
 
     // CRITICAL: Check veto first - if ML says bad timing, it's not a good entry
     if (veto_analysis?.vetoed || veto_analysis?.verdict === 'VETO') {
@@ -195,6 +197,12 @@ function isGoodEntry(analysis: AnalysisResult): boolean {
         return false;
     }
 
+    // Require at least MODERATE soft signal strength (insider/congress buying)
+    const hasPositiveSoftSignal =
+        softSignals.signal_strength === 'STRONG' ||
+        softSignals.signal_strength === 'MODERATE';
+
+    if (!hasPositiveSoftSignal) return false;
     if (success_probability < 70) return false;
 
     // Check if current price is within 3% of any support zone

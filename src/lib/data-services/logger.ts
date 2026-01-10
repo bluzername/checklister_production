@@ -12,7 +12,7 @@ import { createClient } from '@supabase/supabase-js';
 export interface ApiLogEntry {
     id: string;
     timestamp: Date;
-    service: 'yahoo' | 'eodhd' | 'fmp' | 'claude' | 'cache';
+    service: 'yahoo' | 'eodhd' | 'fmp' | 'claude' | 'cache' | 'quiver';
     operation: string;
     ticker: string;
     latency_ms: number;
@@ -57,6 +57,7 @@ const COST_PER_CALL: Record<string, number> = {
     fmp: 0.0001,        // ~$10/mo for 100k calls
     claude: 0.00025,    // Haiku pricing
     cache: 0,           // Free (local)
+    quiver: 0.0003,     // ~$30/mo for 100k calls (estimate)
 };
 
 /**
