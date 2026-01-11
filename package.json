@@ -87,6 +87,7 @@
     "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.0.4",
+    "pg": "^8.16.3",
     "playwright": "^1.57.0",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",

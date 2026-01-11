@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server';
+import { createAdminClient, isAdminConfigured } from '@/lib/supabase/admin';
 
 // ============================================
 // TYPES
@@ -176,10 +177,10 @@ export async function upsertRecommendation(input: RecommendationInput): Promise<
     error?: string;
 }> {
     try {
-        if (!isSupabaseConfigured()) {
-            return { success: false, error: 'Database not configured' };
+        if (!isAdminConfigured()) {
+            return { success: false, error: 'Admin client not configured' };
         }
-        const supabase = await createClient();
+        const supabase = createAdminClient();
 
         const { data, error } = await supabase
             .from('recommendations')
@@ -222,10 +223,10 @@ export async function upsertRecommendations(inputs: RecommendationInput[]): Prom
     error?: string;
 }> {
     try {
-        if (!isSupabaseConfigured()) {
-            return { success: false, error: 'Database not configured' };
+        if (!isAdminConfigured()) {
+            return { success: false, error: 'Admin client not configured' };
         }
-        const supabase = await createClient();
+        const supabase = createAdminClient();
 
         const records = inputs.map(input => ({
             ticker: input.ticker.toUpperCase(),
@@ -268,10 +269,10 @@ export async function cleanupOldRecommendations(keepTickers: string[]): Promise<
     error?: string;
 }> {
     try {
-        if (!isSupabaseConfigured()) {
-            return { success: false, error: 'Database not configured' };
+        if (!isAdminConfigured()) {
+            return { success: false, error: 'Admin client not configured' };
         }
-        const supabase = await createClient();
+        const supabase = createAdminClient();
 
         // First get count of items to be removed
         const { data: toRemove } = await supabase
