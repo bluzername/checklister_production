@@ -357,12 +357,16 @@ export interface PortfolioPosition {
   remaining_shares?: number;
 }
 
+// Watchlist source tracking
+export type WatchlistSource = 'manual' | 'politician_trading' | 'insider_activity' | 'scanner';
+
 export interface WatchlistItem {
   id: string;
   user_id: string;
   ticker: string;
   date_added: string;
   notes?: string;
+  source?: WatchlistSource;  // Where this item came from
   // Computed fields
   current_price?: number;
   score?: number;
